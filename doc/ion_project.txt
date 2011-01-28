@@ -27,7 +27,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
         Excluding all CP0 instructions related to TLB.
     2.- Catch all undefined opcodes (and trigger exception).
     3.- Operate in kernel/user mode as per the architecture definition.
-    4.- Handle exceptions in a manner compatible to Plasma.
+    4.- Handle exceptions in a manner compatible to MIPS-I standard.
     5.- Implement as much of CP0 as necessary for the above goals.
     6.- Be no bigger than Plasma in a Spartan-3 or Cyclone-2 device, and
         no slower.
@@ -46,11 +46,10 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     For a second iteration I plan on the following:
 
     1.- Proper interlocking of load cycles (with no wasted cycles).
-    2.- Exception handling compatible to MIPS-I.
-    3.- External interrupt support.
-    4.- Code cache and data cache, even if not standard.
+    2.- External interrupt support.
+    3.- Code cache and data cache, even if not standard.
         No MMU and no TLB, and no cache-related instructions.
-    5.- Interface to external SRAM on 16-bit data bus.
+    4.- Interface to external SRAM on 16-bit data bus.
 
 
     It will take a lot of svn commits to do all of the above so don't hold
@@ -103,9 +102,9 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
         3.- Trap instructions: due to the way exceptions are handled, neither
             'break' nor 'syscall' can be executed from a jump delay slot.
-            Besides, they don't abort jump or load/store instructions properly.
 
-    ### Synthesis results
+
+    ### Synthesis results (for SVN revision 1)
 
         Quartus/Cyclone-2 (speed grade -7)
 
@@ -130,7 +129,9 @@ Send bug reports or comments to ja_rd[at]hotmail.com
         Remember the above results are for a core with no mul/div module. This
         module is hugely expensive (I budgeted 600 LUTs for it).
 
-        The performance meets the goal so far.
+        Note the above is for revision 1. As I add functionality the area will
+        grow. I will only update the numbers if there is a difference of more
+        than 50 LUTs.
 
 
 1.3.- Next steps
@@ -510,26 +511,23 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
 2.5 Exceptions
 
-    Exceptions are unimplemented yet. 
-    Instructions 'break' and 'syscall', which should trigger an exception, do
-    instead a jump to a fixed address (0x03c), like Plasma does.
+    The only exceptions supported so far are software exceptions, and of those 
+    only the instructions BREAK and SYSCALL. 
     
-    The only pecularity is that they save the address of the next
-    instruction to register ep (unlike jal, which would save the second to 
-    next to $ra) and they abort the next instruction. The epc register is not 
-    used by any instruction other than mfc0.
+    Both do wha
+    They save their own address to EPC, abort the following instruction, and
+    jump to the exception vector 0x03c. All as per the specs.
     
-    The abort is performed by disabling register bank writes for the ALU stage
-    following the ALU stage where the exception is triggered -- we're talking
-    about an exception that is triggered by the instruction decode logic. 
-    Jump instructions and load/store instructions are not aborted properly.
+    They do NOT work, however, from the delay slot of a jump instruction. This 
+    is not a serious limitation, though it migh be fixed in later versions.
     
-    This exception scheme will not work if the instruction is placed in the 
-    delay slot of a jump (same as Plasma).
+    The following instructio is aborted even if it is a load or a jump.
     
-    Anyway, proper implementation of exceptions can wait; for the time being 
-    it's much easier to just fix the toolchain and startup code.
-
+    Plasma used to save in epc the address of the instruction after break or 
+    syscall. This core will use the standard MIPS way instead.
+    
+    Note that the epc register is not used by any instruction other than mfc0;
+    ERET is not implemented yet, because privilege levels aren't either.
 
 
 3.- Logic simulation
