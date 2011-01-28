@@ -62,8 +62,10 @@ OS_AsmPatchValue:
     nop
 
     .org    0x3c
+    # FIXME assume exception is trap or break for the time being
 InterruptVector:                # Address=0x3c
     mfc0    $26,$14             # C0_EPC=14 (Exception PC)
+    addi    $26,$26,4           # skip trap instruction
     jr      $26
     add     $4,$4,5
    
@@ -709,12 +711,23 @@ BreakTest:
     lb      $2,16($2)       
     
     break   0               # check if jump instruction is aborted (@log)
-    j       break_jump_test
+    j       break_jump_test1
     add     $4,$4,5
     
-break_jump_test:
+break_jump_test1:
     add     $4,$4,1         # make sure the jump shows in the log (@log)
 
+    # TODO traps in delay slots not supported yet
+    #j       break_jump_test2# check if break works in delay slot of jump
+    #break   0
+    nop
+    j       break_continue
+    nop
+
+break_jump_test2:
+    add     $4,$4,1
+    
+break_continue:
     sb      $23,0($20)
     sb      $21,0($20)    
     .endif
