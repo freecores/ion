@@ -375,10 +375,12 @@ p0_pc_incremented <= p0_pc_reg + (not stall_pipeline);
 p0_pc_next <= 
     p0_pc_target when
         -- We jump on jump instructions whose condition is met...
-        ((p1_jump_type(1)='1' and p0_jump_cond_value='1') or
-        -- ... or on exceptions...
+        ((p1_jump_type(1)='1' and p0_jump_cond_value='1' and 
+        -- ...except we abort any jump that follows the victim of an exception
+          p2_exception='0') or
+        -- We jump on exceptions too...
         p1_exception='1') 
-        -- ... but only if the pipeline is not stalled
+        -- ... but we only jump at all if the pipeline is not stalled
         and stall_pipeline='0'
     else p0_pc_incremented;
 
@@ -506,7 +508,9 @@ p1_do_reg_jump <= '1' when p1_op_special='1' and p1_ir_fn(5 downto 1)="00100" el
 p1_do_zero_ext_imm <= '1' when (p1_ir_op(31 downto 28)="0011") else '0';
 
 -- Decode input data mux control (LW, LH, LB, LBU, LHU) and load enable
-p1_do_load <= '1' when p1_ir_op(31 downto 29)="100" else '0';
+p1_do_load <= '1' when p1_ir_op(31 downto 29)="100" and
+                       p2_exception='0'
+              else '0';
 
 p1_load_alu_set0 <= '1' 
     when p1_op_special='1' and 
@@ -625,25 +629,34 @@ begin
     end if;
 end process pipeline_stage1_register;
 
--- Stage 2 pipeline register. Involved in memory loads.
+
+-- Stage 2 pipeline register. Split in two for convenience.
 -- This register deals with two kinds of stalls:
 -- * When the pipeline stalls because of a load interlock, this register is 
 --   allowed to update so that the load operation can complete while the rest of
 --   the pipeline is frozen.
 -- * When the stall is caused by any other reason, this register freezes with 
 --   the rest of the machine.
-pipeline_stage2_register:
+
+-- Part of stage 2 register that controls load operation
+pipeline_stage2_register_load_control:
 process(clk)
 begin
     if clk'event and clk='1' then
-        if reset='1' then
-            p2_exception <= '0';
+        -- Clear load control, effectively preventing load, at reset or if
+        -- the previous instruction raised an exception.
+        if reset='1' or p2_exception='1' then
             p2_do_load <= '0';
             p2_ld_upper_hword <= '0';
             p2_ld_upper_byte <= '0';
             p2_ld_unsigned <= '0';
             p2_load_target <= "00000";
-        elsif stall_pipeline='0' or load_interlock='1' then
+        
+        -- Load signals from previous stage only if there is no pipeline stall
+        -- unless the stall is caused by interlock (@note1).
+        elsif (stall_pipeline='0' or load_interlock='1') then
+            -- Disable reg bank writeback if pipeline is stalled; this prevents
+            -- duplicate writes in case the stall is a mem_wait.
             if pipeline_stalled='0' then
                 p2_do_load <= p1_do_load;
             else
@@ -653,11 +666,26 @@ begin
             p2_ld_upper_hword <= p1_ld_upper_hword;
             p2_ld_upper_byte <= p1_ld_upper_byte;
             p2_ld_unsigned <= p1_ld_unsigned;
-            p2_rd_addr <= p1_data_addr(1 downto 0);
-            p2_exception <= p1_exception;            
         end if;
     end if;
-end process pipeline_stage2_register;
+end process pipeline_stage2_register_load_control;
+
+-- All the rest of the stage 2 register
+pipeline_stage2_register_others:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            p2_exception <= '0';
+            
+        -- Load signals from previous stage only if there is no pipeline stall
+        -- unless the stall is caused by interlock (@note1).
+        elsif (stall_pipeline='0' or load_interlock='1') then
+            p2_rd_addr <= p1_data_addr(1 downto 0);
+            p2_exception <= p1_exception;
+        end if;
+    end if;
+end process pipeline_stage2_register_others;
 
 --------------------------------------------------------------------------------
 
