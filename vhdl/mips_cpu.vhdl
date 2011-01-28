@@ -80,6 +80,7 @@ architecture rtl of mips_cpu is
 -- Pipeline stage 0
 
 signal p0_pc_reg :          t_pc;
+signal p0_pc_restart :      t_pc;
 signal p0_pc_incremented :  t_pc;
 signal p0_pc_jump :         t_pc;
 signal p0_pc_branch :       t_pc;
@@ -394,6 +395,12 @@ begin
         else
             -- p0_pc_reg holds the same value as external sync ram addr register
             p0_pc_reg <= p0_pc_next;
+            -- p0_pc_restart = addr saved to EPC on interrupts (@note2)
+            -- It's the addr of the instruction triggering the exception
+            -- FIXME handle delay slot case
+            if (p1_jump_type="00" or p0_jump_cond_value='0') then 
+                p0_pc_restart <= p0_pc_reg;
+            end if;
         end if;
     end if;
 end process pc_register;
@@ -781,7 +788,7 @@ begin
                 cp0_status <= p1_rs(cp0_status'high downto 0);
             end if;
             if p1_exception='1' then
-                cp0_epc <= p0_pc_reg;
+                cp0_epc <= p0_pc_restart;
             end if;
         end if;
     end if;
