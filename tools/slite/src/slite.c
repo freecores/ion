@@ -591,9 +591,12 @@ void cycle(State *s, int show_mode)
    }
    if(show_mode > 5)
       return;
-   epc = s->pc + 4;
-   if(s->pc_next != s->pc + 4)
-      epc |= 2;  //branch delay slot
+   /* epc will point to the victim instruction, i.e. THIS instruction */
+   epc = s->pc;
+   if(s->pc_next != s->pc + 4){
+      /* FIXME traps in delay slots not supported yet */
+      //epc = epc - 4;  /* trap in branch delay slot */
+   }
 
    s->pc = s->pc_next;
    s->pc_next = s->pc_next + 4;
@@ -796,6 +799,7 @@ void cycle(State *s, int show_mode)
       */
    }
 
+   /* Handle exceptions */
    if(s->exceptionId)
    {
       r[rt] = rSave;
