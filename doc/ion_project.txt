@@ -79,7 +79,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
         - RTE instruction.
         - Most of the CP0 registers and of course all of the CP1.
         - External interrupts.
-        - Syscall instruction (just aborts next instruction and jal's to 0x3c).
+        - Syscall instruction (very limited implementation).
 
     ### Things implemented but not tested.
         - Memory pause input.
@@ -512,13 +512,12 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     Exceptions are unimplemented yet. 
     Instructions 'break' and 'syscall', which should trigger an exception, do
-    instead a jal to a fixed address (0x03c), which is the same as Plasma does.
+    instead a jump to a fixed address (0x03c), like Plasma does.
     
     The only pecularity is that they save the address of the next
-    instruction to register $ra (unlike jal, which would save the second to 
-    next) and they abort the next instruction. They save the EPC register as
-    specified too, though the epc register is not used by any instruction other
-    than mfc0.
+    instruction to register ep (unlike jal, which would save the second to 
+    next to $ra) and they abort the next instruction. The epc register is not 
+    used by any instruction other than mfc0.
     
     The abort is performed by disabling register bank writes for the ALU stage
     following the ALU stage where the exception is triggered -- we're talking
