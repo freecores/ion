@@ -17,3 +17,7 @@ The makefile will build a binary that you can run in the software simulator:
 It will build a vhdl test bench at /vhdl/tb/mips_tb1.vhdl (overwriting) that you
 can try on your VHDL simulator (the provided script and the VHDL code have some
 dependence on Modelsim, see project readme file).
+
+
+WARNING: the gnu assembler expands DIV* instructions, inserting code that 
+handles division by zero. Bear that in mind when reading the listing file.

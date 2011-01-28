@@ -1,5 +1,5 @@
 ################################################################################
-# opcode.s -- MIPS opcode tester for xxx project
+# opcode.s -- MIPS opcode tester for Ion project
 #-------------------------------------------------------------------------------
 # ORIGINAL AUTHOR: Steve Rhoads (rhoadss@yahoo.com) -- 1/10/01
 #
@@ -7,31 +7,35 @@
 # project (http://opencores.org/project,plasma). 
 # COPYRIGHT: Software placed into the public domain by the original author.
 # Software 'as is' without warranty.  Author liable for nothing.
+#
 #-------------------------------------------------------------------------------
-# This assembly file tests all of the opcodes supported by the xxx core. 
+#
+# This assembly file tests all of the opcodes supported by the Ion core. 
 # This test assumes that address 0x20000000 is the UART write register.
 # Successful tests will print out "A" or "AB" or "ABC" or ....
 # Missing letters or letters out of order indicate a failure.
 #-------------------------------------------------------------------------------
-# The core supports all the MIPS-I instructions, except for MULT* and DIV*.
-# C code needs to be compiled with the "-mno-mul" flag and linked with 'math.c'.
-# NOTE: the regular gcc compiler (v xxx) does NOT support this option!
-#-------------------------------------------------------------------------------
-# Summary of differences to original code:
+# NOTE: This test bench relies on the simulation logs to catch errors. That is,
+# unlike the original Plasma code, this one does not test the test success 
+# conditions. instead, it performs the operations to be tested and relies on you
+# to compare the logs from the logic simulation and the software simulation.
+# Test that work this way have been commented with this tag: "@log"
 #
-# 1.- MUL* or DIV* are not implemented so that part has been commented out.
-# 2.- Plasma does not need a 'delay slot' after a L* before the result is used,
-#     unlike the conventional MIPS-I architecture. In this code NOPs have been
-#     inserted where necessary so that it works whether or not the core has load
-#     delay slots (as opposed to load interlock). This means that this code 
-#     can't be used to validate load interlock implementation.
+#-------------------------------------------------------------------------------
+# NOTE: NOPs have been inserted after load instructions.
 #
 ################################################################################
 
+    #-- Set flags below to >0 to enable/disable test assembly ------------------
 
-    # Set to >0 to test unaligned loads and/or stores 
-    .set TEST_UNALIGNED_LOADS, 0
-    .set TEST_UNALIGNED_STORES, 0
+    .set TEST_UNALIGNED_LOADS, 0        # unaligned loads
+    .set TEST_UNALIGNED_STORES, 0       # unaligned stores
+    .set TEST_BREAK, 1                  # BREAK instruction
+    # WARNING: the assembler expands div instructions, see 'as' manual
+    .set TEST_DIV, 0                    # DIV* instructions
+    .set TEST_MUL, 0                    # MUL* instructions
+
+    #---------------------------------------------------------------------------
 
     .text
     .align  2
@@ -150,10 +154,8 @@ ArthmeticTest:
     sb      $23,0($20)
     sb      $21,0($20)
  
-    # DIV not implemented so skip div test
-    # FIXME skip conditionaly
-    j       skip_div_test
-    nop
+    # DIV tests, skip conditionally
+    .ifgt TEST_DIV
     
     #e: DIV
     ori     $2,$0,'e'
@@ -200,13 +202,10 @@ ArthmeticTest:
     sb      $4,0($20)    #A
     sb      $23,0($20)
     sb      $21,0($20)
- 
-skip_div_test:
+    .endif
 
-    # MUL not implemented so skip mul test
-    # FIXME skip conditionaly
-    j       skip_mult_test
-    nop
+    # MUL tests, skip conditionally
+    .ifgt   TEST_MUL
  
     #g: MULT
     ori     $2,$0,'g'
@@ -265,8 +264,7 @@ skip_div_test:
     sb      $4,0($20)    #A
     sb      $23,0($20)
     sb      $21,0($20)
- 
-skip_mult_test:
+    .endif
  
     #i: SLT
     ori     $2,$0,'i'
@@ -695,17 +693,31 @@ $JR1:
  
  #   b     LoadTest
  
+    
 BreakTest:
+    .ifgt TEST_BREAK
     #p: BREAK
-    ori     $2,$0,'p'
+    ori     $2,$0,'p'       # check if it jumps to break address and comes back
     sb      $2,0($20)
     ori     $2,$0,'z'
     ori     $4,$0,59
     break   0
     addi    $4,$4,1
     sb      $4,0($20)
+    
+    break   0               # check if load instruction is aborted (@log)
+    lb      $2,16($2)       
+    
+    break   0               # check if jump instruction is aborted (@log)
+    j       break_jump_test
+    add     $4,$4,5
+    
+break_jump_test:
+    add     $4,$4,1         # make sure the jump shows in the log (@log)
+
     sb      $23,0($20)
-    sb      $21,0($20)
+    sb      $21,0($20)    
+    .endif
  
     #q: SYSCALL
     ori     $2,$0,'q'
