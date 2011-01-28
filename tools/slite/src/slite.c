@@ -139,6 +139,18 @@ extern void __stdcall Sleep(unsigned long value);
 
 #define MMU_ENTRIES 4
 #define MMU_MASK (1024*4-1)
+/*----------------------------------------------------------------------------*/
+
+/* These are flags that will be used to notify the main cycle function of any
+   failed assertions in its subfunctions. */
+#define ASRT_UNALIGNED_READ         (1<<0)
+#define ASRT_UNALIGNED_WRITE        (1<<1)
+
+char *assertion_messages[2] = {
+   "Unaligned read",
+   "Unaligned write"
+};
+
 
 /** Length of debugging jump target queue */
 #define TRACE_BUFFER_SIZE (32)
@@ -160,8 +172,12 @@ typedef struct
 typedef struct {
    int load_delay_slot;
    int delay;
-   unsigned int delayed_reg;
+   unsigned delayed_reg;
    int delayed_data;
+
+   unsigned failed_assertions;            /**< assertion bitmap */
+   unsigned faulty_address;               /**< addr that failed assertion */
+
    int r[32];
    int opcode;
    int pc, pc_next, epc;
@@ -170,7 +186,7 @@ typedef struct {
    int status;
    int userMode;
    int processId;
-   int exceptionId;
+   int exceptionId;        /**< DEPRECATED, to be removed */
    int faultAddr;
    int irqStatus;
    int skip;
@@ -220,6 +236,7 @@ void close_trace_buffer(State *s);
 void dump_trace_buffer(State *s);
 void log_cycle(State *s);
 void log_read(State *s, int full_address, int word_value, int size, int log);
+void log_failed_assertions(State *s);
 
 /* Hardware simulation */
 int mem_read(State *s, int size, unsigned int address, int log);
@@ -295,13 +312,25 @@ int mem_read(State *s, int size, unsigned int address, int log)
             printf("Unaligned access PC=0x%x address=0x%x\n",
                    (int)s->pc, (int)address);
          }
-         assert((address & 3) == 0);
+         /* We don't want the program to just quit, we want to log the fault */
+         /* assert((address & 3) == 0); */
+         if((address & 3) != 0){
+            s->failed_assertions |= ASRT_UNALIGNED_READ;
+            s->faulty_address = address;
+            address = address & 0xfffffffc;
+         }
          value = *(int*)ptr;
          if(s->big_endian)
             value = ntohl(value);
          break;
       case 2:
-         assert((address & 1) == 0);
+         /* We don't want the program to just quit, we want to log the fault */
+         /* assert((address & 1) == 0); */
+         if((address & 1) != 0){
+            s->failed_assertions |= ASRT_UNALIGNED_READ;
+            s->faulty_address = address;
+            address = address & 0xfffffffe;
+         }
          value = *(unsigned short*)ptr;
          if(s->big_endian)
             value = ntohs((unsigned short)value);
@@ -402,13 +431,25 @@ void mem_write(State *s, int size, unsigned address, unsigned value)
    switch(size)
    {
       case 4:
-         assert((address & 3) == 0);
+         /* We don't want the program to just quit, we want to log the fault */
+         /* assert((address & 3) == 0); */
+         if((address & 3) != 0){
+            s->failed_assertions |= ASRT_UNALIGNED_WRITE;
+            s->faulty_address = address;
+            address = address & (~0x03);
+         }
          if(s->big_endian)
             value = htonl(value);
          *(int*)ptr = value;
          break;
       case 2:
-         assert((address & 1) == 0);
+         /* We don't want the program to just quit, we want to log the fault */
+         /* assert((address & 1) == 0); */
+         if((address & 1) != 0){
+            s->failed_assertions |= ASRT_UNALIGNED_WRITE;
+            s->faulty_address = address;
+            address = address & (~0x01);
+         }
          if(s->big_endian)
             value = htons((unsigned short)value);
          *(short*)ptr = (unsigned short)value;
@@ -725,6 +766,13 @@ void cycle(State *s, int show_mode)
    s->pc_next &= ~3;
    s->skip = (lbranch == 0) | skip2;
 
+   /* If there was trouble, log it */
+   if(s->failed_assertions!=0){
+      log_failed_assertions(s);
+      s->failed_assertions=0;
+   }
+
+
    /* if there's a delayed load pending, do it now: load reg with memory data */
    if(s->load_delay_slot){
       /*--- simulate real core's load interlock ---*/
@@ -967,7 +1015,10 @@ int main(int argc,char *argv[])
    */
 
    /* Simulate a CPU reset */
-   s->pc = 0x0;
+   /* FIXME cpu reset function needed */
+   s->pc = 0x0;      /* reset start vector */
+   s->failed_assertions = 0; /* no failed assertions pending */
+
    /* FIXME PC fixup at address zero has to be removed */
    index = mem_read(s, 4, 0, 0);
    if((index & 0xffffff00) == 0x3c1c1000){
@@ -1064,5 +1115,23 @@ void log_cycle(State *s){
 void close_trace_buffer(State *s){
    if(s->t.log){
       fclose(s->t.log);
+   }
+}
+
+/** Logs a message for each failed assertion, each in a line */
+void log_failed_assertions(State *s){
+   unsigned bitmap = s->failed_assertions;
+   int i = 0;
+
+   /* This loop will crash the program if the message table is too short...*/
+   if(s->t.log != NULL){
+      for(i=0;i<32;i++){
+         if(bitmap & 0x1){
+            fprintf(s->t.log, "ASSERTION FAILED: [%08x] %s\n",
+                    s->faulty_address,
+                    assertion_messages[i]);
+         }
+         bitmap = bitmap >> 1;
+      }
    }
 }
