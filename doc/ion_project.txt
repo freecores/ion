@@ -1,0 +1,1003 @@
+This file contains instructions and notes about the Ion CPU core project.
+The core structure is briefly explained in section 2. The rest of this doc is 
+mostly usage instructions for the test samples and custom utilities.
+
+
+Last modified: Jan/27/2011
+
+Send bug reports or comments to ja_rd[at]hotmail.com
+
+
+
+1.- Introduction
+================================================================================
+
+    This is a MIPS-I compatible CPU, implementing enough of the MIPS-I
+    architecture to be used with a standard mips C toolchain. It is meant as
+    a starting point for a MIPS-32/r1 core.
+
+1.1.- Project goals
+
+    The first iteration of the project will be deemed finished when it can do
+    the following:
+
+    1.- Run a minimal set of MIPS-I opcodes
+        Excluding unaligned load/store (formerly patented).
+        Excluding all CPA instructions.
+        Excluding all CP0 instructions related to TLB.
+    2.- Catch all undefined opcodes (and trigger exception).
+    3.- Operate in kernel/user mode as per the architecture definition.
+    4.- Handle exceptions in a manner compatible to Plasma.
+    5.- Implement as much of CP0 as necessary for the above goals.
+    6.- Be no bigger than Plasma in a Spartan-3 or Cyclone-2 device, and
+        no slower.
+        Speed measured in raw clock frequency for the time being.
+        (I.e. don't not consider stalls, interlocks, etc. yet)
+    7.- Interlock behavior of MUL/DIV and L* compatible to toolchain.
+        That is, interlock loads instead of relying on a delay slot.
+        The reason is that it might not be easy to set up the toolchain to
+        produce bona-fide mips1 code in this regard; I have to test.
+
+    Unaligned load/stores are excluded not because of patent concerns (the
+    patents already expired) but because they're not essential for a first
+    version of the core. The same goes for all other exclusions.
+
+
+    For a second iteration I plan on the following:
+
+    1.- Proper interlocking of load cycles (with no wasted cycles).
+    2.- Exception handling compatible to MIPS-I.
+    3.- External interrupt support.
+    4.- Code cache and data cache, even if not standard.
+        No MMU and no TLB, and no cache-related instructions.
+    5.- Interface to external SRAM on 16-bit data bus.
+
+
+    It will take a lot of svn commits to do all of the above so don't hold
+    your breath.
+
+
+
+1.2.- Development status
+
+    In its present state, the CPU can pass a basic opcode test and can execute
+    some basic MIPS-I code compiled with standard gcc tools (specifically, it
+    can run a tiny 'hello world' program, see section 6).
+    'Basic' means that the core has a number of limitations that prevent it from
+    running just any code -- no multiplication unit, for one thing.
+    The opcode test is included in '/src/opcodes/opcodes.s' (see section 6).
+
+
+    This is the state of the CPU at this time:
+
+    ### PLASMA features not implemented yet
+        - MUL*/DIV* instructions.
+
+    ### Other MIPS-I things not implemented
+        - Invalid instruction detection & trapping.
+        - Kernel/user status.
+        - RTE instruction.
+        - Most of the CP0 registers and of course all of the CP1.
+        - External interrupts.
+        - Syscall instruction (just aborts next instruction and jal's to 0x3c).
+
+    ### Things implemented but not tested.
+        - Memory pause input.
+
+    ### Things with provisional implementation
+
+        1.- Load interlocks: the pipeline is stalled for every load instruction,
+            even if the target register is not used in the following
+            instruction. So that every load takes two cycles.
+            The interlock logic should check register indices and stall only if
+            there is a data hazard.
+            Note that all that's needed is a better identification of stall
+            conditions; the logic to enable a load instruction that does not
+            stall to overlap the next instruction is already in place.
+            The interlock logic needs a stronger test bench anyway.
+
+        2.- Invalid instructions are not detected as such. Their behaviour is
+            undefined and unpredictable.
+            Invalid opcodes should trigger an exception or at least just NOP.
+            This is closely related to privilege level so it will have to wait.
+
+        3.- Trap instructions: due to the way exceptions are handled, neither
+            'break' nor 'syscall' can be executed from a jump delay slot.
+            Besides, they don't abort jump or load/store instructions properly.
+
+    ### Synthesis results
+
+        Quartus/Cyclone-2 (speed grade -7)
+
+            1033 LEs + 2 M4K blocks @53 MHz -- optimized for area
+
+        ISE/Spartan3 (speed grade -5) (synthesized with 'high effort' on)
+
+            Distributed register bank:
+
+            1445 LUTs           @ 58 MHz -- speed-optimized
+            1338 LUTs           @ 37 MHz -- area-optimized
+
+            BRAM register bank:
+
+            1104 LUTs + 2 BRAM  @ 58 MHz -- speed-optimized
+            1018 LUTs + 2 BRAM  @ 37 MHZ -- area-optimized
+
+
+        Using 2 Spartam-3 2K-byte BRAMs for the 1024-bit triple-port register
+        bank looks like a waste but the choice is there.
+
+        Remember the above results are for a core with no mul/div module. This
+        module is hugely expensive (I budgeted 600 LUTs for it).
+
+        The performance meets the goal so far.
+
+
+1.3.- Next steps
+
+    * Implement mul/div instructions.
+    * Implement efficient load interlock detection with no wasted cycles.
+    * Add a couple other code samples, including one with FP arithmetic.
+
+
+
+
+2.- CPU description
+================================================================================
+
+    What follows is a short explaination of
+
+
+2.0.- Some general features
+
+    * Synchronized to rising edge of clk only; no latches.
+    * All inputs need to be synchronous to clk, all outputs are.
+
+
+2.1 Bus architecture
+
+    The CPU uses a Harvard architecture: separate paths for code and data. It
+    has three separate, independent buses: code read, data read and data write.
+
+    The CPU will perform opcode fetches at the same time it does data reads
+    and/or writes. This is not only faster than a Von Neumann architecture where
+    all memory cycles have to be bottlenecked through a single bus; it is much
+    simpler too. And most importantly, it matches the way the CPU will work
+    when connected to code and data caches.
+
+    (Actually, in the current state of the core, due to the inefficient way in
+    which load interlocking has been implemented, the core is less efficient
+    than that -- more on this later.)
+
+    The core can't read and write at the same time; this is a fundamental 
+    limitation of the core structure: doing both at the same time would take 
+    one more read port in the register bank -- tooo expensive.
+
+    In the most basic use scenario (no external memory and no caches), code and
+    data buses have a common address space but different storages and the
+    architecture is strictly Harvard. As soon as caches and external memory are
+    implemented, the architecture will be Modified Harvard.
+
+
+2.1.1 Code and data read bus interface
+
+    Both buses have the same interface:
+
+    *_rd_addr   : Address bus
+    *_rd        : Data/opcode bus
+    *_rd_vma    : Valid Memory Address (VMA)
+
+    The CPU assumes SYNCHRONOUS external memory (most or all FPGA architectures
+    have only synchronous RAM blocks):
+
+    When *_rd_vma is active ('1'), *_rd_addr is a valid read address and the
+    memory should provide read data at the next clock cycle.
+
+    The following ascii-art waveforms depict simple data and code read cycles
+    where there is no interlock -- interlock is discussed in section 2.3.
+
+
+    ==== Chronogram 1.A: data read cycle, no stall ========================
+                         ____      ____      ____      ____      ____
+     clk            ____/    \____/    \____/    \____/    \____/    \____/
+
+                         _________           _________
+     data_rd_vma    ____/         \_________/         \____________________
+
+     data_rd_addr   XXXX| 0x0700  |XXXXXXXXX| 0x0800  |XXXXXXXXX|XXXXXXXXX|
+
+     data_rd        XXXX|XXXXXXXXX| [0x700] |XXXXXXXXX| [0x800] |XXXXXXXXX|
+
+     (target reg)   ????|?????????|?????????| [0x700] |?????????| [0x800] |
+
+              (data is registered here...)--^    (...and here)--^
+
+     ==== Chronogram 1.B: code read cycle, no stall =======================
+                         ____      ____      ____      ____      ____
+     clk            ____/    \____/    \____/    \____/    \____/    \____/
+
+                         __________________________________________________
+    code_rd_vma     ____/         |         |         |         |         |
+
+                    ????| 0x0100  | 0x0104  | 0x0108  | 0x010c  | 0x0200  |
+
+    code_rd         XXXX|XXXXXXXXX| [0x100] | [0x104] | [0x108] | [0x10c] |
+
+    p1_ir_reg       ????|?????????|?????????| [0x100] | [0x104] | [0x108] |
+
+      (first code word is registered here)--^
+
+    ========================================================================
+
+
+    The data address bus is 32-bit wide; the lowest 2 bits are redundant since
+    the CPU always reads full words, but they may be useful for debugging.
+
+2.1.2 Data write interface
+
+    The write bus does not have a vma output because byte_we fulfills the same
+    role:
+
+    *_wr_addr   : Address bus
+    *_wr        : Data/opcode bus
+    byte_we     : WE for each of the four bytes
+
+    Write cycles are synchronous too. The four bytes in the word should be
+    handled separately -- the CPU will assert a combination of byte_we bits
+    according to the size and alignment of the store.
+
+    When byte_we(i) is active, the matching byte at data_wr should be stored
+    at address data_wr_addr. byte_we(0) is for the LSB, byte_we(3) for the MSB.
+    Note that since the CPU is big endian, the MSB has the lowest address and
+    LSB the highest. the memory system does not need to care about that.
+
+    Write cycles span a single clock cycle and are not subject to data-hazard
+    stalls.
+
+    This is the waveform for a basic write cycle.
+
+    ==== Chronogram 2: data write cycle ===================================
+                         ____      ____      ____      ____      ____
+     clk            ____/    \____/    \____/    \____/    \____/    \____/
+
+     byte_we        XXXX|  1111   |  0000   |  0100   |  1100   |  0000   |
+
+     data_wr_addr   XXXX| 0x0700  |XXXXXXXXX| 0x0800  | 0x0900  |XXXXXXXXX|
+
+     data_wr        XXXX|12345678h|XXXXXXXXX|12345678h|12345678h|XXXXXXXXX|
+
+     [0x0700]       ????|????????h|12345678h|12345678h|12345678h|12345678h|
+
+     [0x0800]       ????|????????h|????????h|????????h|??34????h|??34????h|
+
+     [0x0900]       ????|????????h|????????h|????????h|????????h|1234????h|
+
+    ========================================================================
+
+    Note the two back-to-back stores to addresses 0x0800 and 0x0900. They are
+    produced by two consecutive S* instructions (SB and SH in the example),
+    and can only be done this fast because of the Harvard architecture.
+
+
+2.1.3 Memory wait cycles
+
+    Memory wait cycles are still unimplemented. Actually, the logic is there
+    but has not been tested yet and will probably need some refactor to prevent
+    glitches.
+
+    In short, the 'mem_wait' input will unconditionally stall all pipeline
+    stages as long as it is active. It is meant to be used by the cache at cache 
+    misses.
+
+    Little more to say until this is done and tested...
+
+
+
+2.2 Pipeline
+
+    Here is where I would explain the structure of the cpu in detail; instead, 
+    I'm just going to do 
+    
+    This core has a 3-stage pipeline quite different from the original 
+    architecture spec. Instead of trying to use the original names for the
+    stages, I'll define my own.
+    
+    A computational instruction of the I- or R- type goes through the following
+    stages during execution:
+    
+        * FETCH-0   : Instruction address is in code_rd_addr bus
+        * FETCH-1   : Instruction opcode is in code_rd bus
+        * ALU/MEM   : ALU operation or memory read/write cycle is done OR
+                      Memory read/data address is on data_rd/wr_address bus AND
+                      Memory write data is on data_wr bus
+        * LOAD      : Memory read data is on data_rd bus
+    
+    In the core source (mips_cpu.vhdl) the stages have been numbered:
+    
+        FETCH-1 = stage 0
+        ALU/MEM = stage 1
+        LOAD    = stage 2
+    
+    Here's a couple of examples:
+    
+
+    ==== Chronogram 3.A: stages for instruction "lui gp,0x1" ==============
+                         ____      ____      ____      ____      ____
+     clk            ____/    \____/    \____/    \____/    \____/    \____/
+
+     code_rd_addr       | 0x099c  |                                        
+     
+     code_rd_data                 |3c1c0001h|
+
+     rbank[$gp]                             | 0x0001  |
+     
+                        |< fetch1>|<   0   >|<   1   >|
+                        
+    ==== Chronogram 3.B: stages for instruction "lw a0,16(v0)" ============
+                         ____      ____      ____      ____      ____
+     clk            ____/    \____/    \____/    \____/    \____/    \____/
+
+     code_rd_addr       | 0x099c  |                                        
+     
+     code_rd_data                 |8c420010h|
+     
+     data_rd_addr                           | $v0+16  |
+                                             _________
+     data_rd_vma                       _____/         \______
+     
+     data_rd                                          | <data>  |
+
+     rbank[$a0]                                                 | <data>  |
+     
+                        |< fetch1>|<   0   >|<   1   >|<   2   >|
+                        
+    ========================================================================
+  
+    (Both instructions at address 0x099c)
+  
+    
+    In the source code, all registers and signals in stage <i> are prefixed by 
+    "p<i>_", as in p0_*, p1_* and p2_*. A stage includes a set of registers and 
+    all the logic that feeds from those registers (actually, all the logic
+    that is between registers p0_* and p1_* belongs in stage 0, and so on).
+    Since there are signals that feed from more than one pipeline stage (for
+    example p2_wback_mux_sel, which controls the register bank write port data 
+    multiplexor and feeds from p1 and p2), the naming convention has to be
+    a little flexible.
+    
+    FETCH-0 would only include the logic between p0_pc_reg and the code ram 
+    address port, so it has been omitted from the naming convention.
+    
+    IMPORTANT: though the register bank read port is synchronous, its data can
+    be used in stage 1 because it is read early (the port is loaded at the same 
+    time as the instruction opcode). That is, a small part of the instruction 
+    decoding is done on stage FETCH-1. Bearing in mind that the code ram is 
+    meant to be the exact same type of block as the register bank, and we will 
+    bundle the whole ALU delay plus the reg bank delay in stage 1, it does not
+    hurte moving part of the decoding to the previous cycle.
+    
+    All registers but a few exceptions belong squarely to one of the pipeline
+    stages:
+    
+    
+    Stage 0:
+    p0_pc_reg                               : PC
+    <external code ram read port register>  : Loads the same as PC
+    
+    Stage 1:
+    p1_ir_reg                               : Instruction register
+    <register bank read port register>      :
+    p1_rbank_forward                        : Feed-forward data (hazards)
+    p1_rbank_rs_hazard                      : Rs hazard detected
+    p1_rbank_rt_hazard                      : Rt hazard detected
+    
+    Stage 2:
+    p2_exception                            : Exception control (not finished)
+    p2_do_load                              : Load from data_rd
+    p2_ld_*                                 : Load control
+    <register bank write port register>     :
+    
+    Note how the register bank ports belong in different stages even if it's
+    the same physical device. No conflict here, hazards are handled properly.
+    
+    
+    There is a small number of global registers that don't belong to any 
+    pipeline stage:
+    
+    pipeline_stalled                        : Together, these two signals...
+    pipeline_interlocked                    : ...control pipeline stalls
+    
+    
+    And of course there are special registers accessible to the code:
+    
+        mdiv_hi_reg
+        mdiv_lo_reg
+        cp0_status
+        cp0_epc
+        
+    These belong logically to pipeline stage 1 (can be considered an extension
+    of the register bank) but have been spared the prefix for clarity.
+
+    Again, this needs a better explaination and a diagram.
+
+
+2.3 Interlocking and data hazards
+
+    There are two data hazards we need to care about:
+    
+    a) If an instruction needs to access a register which was modified by the
+    previous instruction, we have a data hazard -- because the register bank is
+    synchronous.
+    
+    b) A memory load into a register Rd produces its result a cycle late, so if
+    the instruction after the load needs to access Rd there is a conflict.
+
+
+    Conflict (a) is solved with some data forwarding logic: if we detect the
+    data hazard, the register bank uses a 'feed-forward' value instead of the
+    value read from the memory file. 
+    In file mips_cpu.vhdl, see process 'data_forward_register' and the following
+    few lines, where the hazard detection logic and data register and 
+    multiplexors are implemented. Note that hazard is detected separately for
+    both read ports of the reg bank (p0_rbank_rs_hazard and p0_rbank_rt_hazard).
+    
+    As for conflict (b), in the original MIPS-I architecture it was the job
+    of the programmer to make sure that a loaded value was not used before it
+    was available -- by inserting NOPs after the load instruction, if necessary.
+    This is what I call the 'load delay slot', as discussed in [2], pag. 13-1.
+    
+    The C toolchain needs to be set up for MIPS-I compliance in order to build
+    object code compatible with this scheme. The very first version of this
+    core worked like that. 
+    But all succeeding versions of the MIPS architecture, including the MIPS-32
+    that this core aims to be compatible with in the future, implement a 
+    different scheme instead, 'load interlock' ([1], pag. 28).
+    In short, it pays to implement load interlocks.
+    
+    Load interlock is triggered in stage 1 (ALU/MEM) of the load instruction;
+    when triggered, the pipeline stages 0 and 1 stall, but the pipeline stage
+    2 is allowed to proceed. That is, PC and IR are frozen but the value loaded
+    from memory is written in the register bank.
+    
+    In the current implementation, the instruction following the load is 
+    UNCONDITIONALLY stalled; even if it does not use the target register of the 
+    load. This prevents, for example, interleaving read and write memory cycles
+    back to back, which the CPU otherwise could do.
+    So the interlock should only be triggered when necessary; this has to be
+    fixed.
+
+
+    ==== Chronogram 4: data read cycle, showing interlock ======================
+                         ____      ____      ____      ____      ____
+     clk            ____/    \____/    \____/    \____/    \____/    \____/
+
+     code_rd_addr   XXXX| 0x099c  | 0x09a0            | 0x09a4  | 0x09a8  |
+     
+     byte_we        XXXX|  0000   |  1111   |  0000   |  0000   |  1100   |
+     
+                                            |<                 >|
+                    ________________________           ____________________             
+     code_rd_vma                            \_________/               
+                                             _________                    
+     data_rd_vma    ________________________/         \____________________
+
+     data_rd_addr   XXXX|XXXXXXXXX|XXXXXXXXX| 0x0700            |XXXXXXXXX|
+
+     data_rd        XXXX|XXXXXXXXX|XXXXXXXXX|XXXXXXXXX| [0x700] |XXXXXXXXX|
+
+     (target reg)   ????|?????????|?????????|?????????| [0x700] |?????????|
+
+                           (data is registered here)--^
+
+    ========================================================================
+
+    Note how a fetch cycle is lost.
+
+    This waveform was produced by this code:
+    
+                ...
+                998:    ac430010    sw  v1,16(v0)
+                99c:    80440010    lb  a0,16(v0)
+                9a0:    a2840000    sb  a0,0(s4)
+                9a4:    80440011    lb  a0,17(v0)
+                9a8:    00000000    nop
+                ...
+
+    Note how read and write cycles are spaced instead of being interleaved, as
+    they would if interlocking was implemented efficiently (in this case, there
+    was a real hazard, register $a0, but that's coincidence).
+
+
+2.5 Exceptions
+
+    Exceptions are unimplemented yet. 
+    Instructions 'break' and 'syscall', which should trigger an exception, do
+    instead a jal to a fixed address (0x03c), which is the same as Plasma does.
+    
+    The only pecularity is that they save the address of the next
+    instruction to register $ra (unlike jal, which would save the second to 
+    next) and they abort the next instruction. They save the EPC register as
+    specified too, though the epc register is not used by any instruction other
+    than mfc0.
+    
+    The abort is performed by disabling register bank writes for the ALU stage
+    following the ALU stage where the exception is triggered -- we're talking
+    about an exception that is triggered by the instruction decode logic. 
+    Jump instructions and load/store instructions are not aborted properly.
+    
+    This exception scheme will not work if the instruction is placed in the 
+    delay slot of a jump (same as Plasma).
+    
+    Anyway, proper implementation of exceptions can wait; for the time being 
+    it's much easier to just fix the toolchain and startup code.
+
+
+
+3.- Logic simulation
+================================================================================
+
+    The project has been simulated using Modelsim 6.3g. The test bench
+    uses some features not present in earlier versions so if you use some other
+    simulator or some earlier version of Modelsim, see section 3.3 below.
+
+    In short, the simulation test bench is meant to run any of the code samples
+    provided in directory /src, under a controlled environment, while logging
+    the cpu state to a text log file.
+
+    This log file can then be compared to a log file generated by a software
+    simulator for the same code sample (see section 5.1). The software
+    simulator is the 'golden model' against which the cpu is tested, so any
+    difference between both log files means trouble.
+
+    This method is far easier than building a fully automated test bench, and
+    much more convenient and reliable than a visual inspection of the simulation
+    state.
+
+    Note that there is so far only one simulation test bench which is used by
+    all the code samples (and there's just two code samples in this release of
+    the project...). The template in file '/src/mips_tb1_template.vhdl' is
+    filled in with all the necesary data (mostly memory init. strings) from the
+    code sample object file(s) and then written to '/vhdl/tb/mips_tb1.vhdl'.
+    The idea is that 'tb1' is an execution harness to be shared by all test
+    programs.
+
+    The test bench template provided is only good to test instruction
+    execution and basic core functionality. As the project moves forward and
+    new features are added (e.g. caches) I will add more test bench templates.
+
+    There's a second template ('/src/mips_tb0_template.vhdl') that is only
+    used with the opcode test. It's simpler than the main template and has all
+    three CPU buses connected to the same RAM. Unlike tb1, this does not
+    resemble the way a real synthesizable system will work, so it is only used
+    for the most basic of tests (opcode operation).
+
+
+3.1.- Running the simulation
+
+    A simulation script can be found at '/sim/mips_tb1.do'. This script will
+    simulate test bench file '/vhdl/tb/mips_tb1.vhdl'.
+
+    The test bench file is automatically generated for each of the sample
+    programs (because it contains initialized memories with the program object
+    code, etc.). This is automatically done by the sample code makefile,
+    assuming you have a MIPs cross-toolchain in your computer (see section 6).
+
+    For convenience, a pre-generated mips_tb1.vhdl is included so you can launch
+    a simulation without having to install toolchains, etc. The code is that
+    of the 'hello world' sample.
+
+    I guess that if you are interested in this sort of stuff then you probably
+    know more about Modelsim than I do. Yet, here's a step-by-step guide to
+    simulating the 'hello world' sample:
+
+    1.- Run 'make hello_sim' from directory '/src/hello'.
+        This will compile the program sources, build the necessary binary object
+        files and then create a vhdl simulation test bench with memories
+        initialized with the object code. The simulation test bench is created
+        as '/vhdl/tb/sim_tb1.vhdl'. You can change that by editing the makefile.
+        Read the makefile and comments in the python script '/src/bin2hdl.py'
+        for details.
+
+        ALTERNATIVELY, if you don't have a toolchain you can just skip this
+        step and use the default 'mips_tb1.vhdl' file provided.
+
+    2.- In modelsim, change directory to /syn (menu file->change directory)
+        Modelsim will create its stuff in this directory. This includes the
+        log file, which by default will be '/syn/hw_sim_log.txt'.
+        (You could use any other directory, this is just a convenient place to
+        put modelsim data out of the way. Just remember where the log file is.).
+
+    3.- Run script '/sim/mips_tb1.do' (menu tools->tcl->execute macro)
+        The simulation will run to completion. In Modelsim's transcript window
+        you will see the program console output, in this case a 'hello world'
+        message.
+        NOTE: Other versions of modelsim have slightly different menus.
+
+    That's it, really.
+
+    Be aware that the simulation timeout is arbitrarily fixed in the test bench
+    template file. This time may or may not be enough to execute the program --
+    it happens to be just enough to run the 'hello world' program. Change it if
+    necessary.
+    I should include some means to check for program termination (perhaps a
+    debug register written to from boot.s after returning from main).
+
+
+
+3.2.- Simulation file logging
+
+    The test bench will log any of the following events:
+
+    - Changes in the register bank.
+    - Changes in registers HI and LO (implemented even if mul/div is not).
+    - Changes in register EPC (implemented even though it is unused).
+    - Data loads (any resulting register change is logged separately).
+    - Data stores.
+
+    Note that changes in other internal registers, including PC, are not logged.
+    This means that for example a long chain of NOPs, or MOVEs that don't change
+    register values, will not be seen in the log file.
+
+    Events are logged with the current value of the PC; this value usually
+    points to the instruction following the instruction that triggered the
+    event, due to pipelining. This holds true even for load instructions.
+
+    The simulation log file is stored by default in modelsim's working directory
+    (see above). I don't provide any automated script to do the comparison, you
+    should use whatever diff tool you like best.
+
+
+3.2.1.- Log file format
+
+    There is a text line for each of the following events:
+
+    * Register change
+
+        "(pc) [reg_num]=value"
+
+        Where:
+
+        pc      => PC value (8-digit hex)
+        reg_num => Register index (2-digit hex), or any of {LO,HI,EP}
+        value   => New register value (8-digit hex)
+
+    * Write cycle (store)
+
+        "(pc) [address] |mask|=value WR"
+
+        Where:
+
+        pc      => PC value (8-digit hex)
+        address => Write address
+        mask    => Byte-enable mask (2-digit hex)
+        value   => Write data
+
+        The mask will have a '1' at bits 3..0 for each byte write-enabled. MSB
+        is bit 3, LSB is bit 0. Note that the data is big endian, so the MSB
+        is actually the LOWER address. The upper nibble of the mask is always 0.
+
+        The value will match the behavior of the ion cpu; the significant
+        byte(s) will have the actual write data and the other bytes will not
+        be relevant but will behave exactly as the real hardware (so that the
+        logs are directly comparable).
+
+        The WR at the end of the line is for visual reference only.
+
+    * Read cycle (load)
+
+        "(pc) [address] <**>=value RD"
+
+        Where:
+
+        pc      => PC value (8-digit hex)
+        address => Read address
+        <**>    => Padding (ignore)
+        value   => Read data
+
+        Pc is the Pc value at the time the load cycle starts (usually the
+        instruction following the load).
+
+        Note that in the real machine, the data is read into the cpu one cycle
+        after the address bus is output (because the memory is synchronous) so
+        that the full read cycle spans 2 clock cycles (when proper interlocking
+        is implemented, the load will overlap the next instruction; right now
+        it just stall the pipeline for 1 cycle). This is simplified in the log
+        files for readability.
+
+        Note that the size of the read (LH/LB/LW) instruction is not recorded.
+
+        The RD at the end of the line is for visual reference only.
+
+
+    For example, these are lines 274-281 of the simulation log for the
+    default 'hello world' test bench:
+
+                ...
+                (00000230) [04]=00010000
+                (00000234) [1D]=00010230
+                (00000238) [00010244] |0F|=00000038 WR
+                (0000023C) [1F]=00000240
+                (00000288) [00010000] <**>=636F6D70 RD
+                (00000288) [05]=00000063
+                (00000294) [07]=0000000A
+                (00000298) [03]=20000000
+                ...
+
+    The read cycle at pc=0x288 modifies register 0x05; that's why there are two
+    lines with the same pc value.
+
+    The code that produced that log is this (from hello.lst):
+
+                ...
+                22c:    3c040001    lui a0,0x1
+                230:    27bdffe8    addiu   sp,sp,-24
+                234:    afbf0014    sw  ra,20(sp)
+                238:    0c0000a1    jal 0x284
+                23c:    24840000    addiu   a0,a0,0
+                ...
+                284:    90850000    lbu a1,0(a0)
+                288:    00000000    nop
+                ...
+
+    (Remember the register numbers: $a0=4, $sp=1d and $ra=1f)
+
+    Please note the addiu instruction in the jal delay slot (which is
+    effectively a nop)and how all changes are logged with the 'next' pc value:
+    the jal change to register 0x1f is logged at the jump target address, and
+    not at the delay slot address.
+    I hope this is not too confusing. It'd be great if we could see the log for
+    a delay-slot instruction other than nop, I'll have to fetch an example from
+    the listing...
+
+
+    The log file format is hardcoded into the simulation test bench template
+    vhdl source and the software simulator C source that implement it. It will
+    be probably modified as the project moves on.
+
+    Note that the software simulation log and the modelsim log need not be the
+    same size; usually the software log will be longer because it spans a longer
+    simulated time.
+    The point is that both need to be identical up to the last line of the
+    shortest file.
+
+
+
+3.3.- Use of Modelsim features
+
+    Apart from the format of the simulation scripts, which would be easy to port
+    to any other simulation tool, the simulation test bench uses a feature of
+    Modelsim 6.3 that is not even present in earlier versions -- SignalSpy.
+
+    The test bench uses SignalSpy to examine internal cpu signals from the top
+    entity, including the whole register bank. There is no other way to examine
+    those signals in vhdl, unless you want to add them to the module interface.
+
+    The test bench needs to access those signals in order to detect changes in
+    the internal cpu state that should be logged. That is, it really needs to
+    look at those signals if it is to be of any use.
+
+    If you are using any other simulation tool, look for an alternative method
+    to get those internal signals or just add them to the core interface. I
+    would suggest adding a debug port of type record to mips_cpu -- and hope the
+    synthesis tool does not choke on it. Adding individual debug ports would be
+    a PITA. I guess this is why Mentor guys took the trouble to write SygnalSpy.
+
+    I plan to move to Symphony EDA eventually, so I'll have to fix this.
+
+
+
+4.- Hardware demo
+================================================================================
+
+
+4.1.- Pre-generated demo
+
+    The project includes a pre-generated demo, the 'hello world' code sample.
+    This is just for convenience, so that you can launch some demo on hardware
+    without installing the C toolchain.
+    A constraints file is provided ('/vhdl/demo/c2sb_demo.csv') which includes
+    all the pin constraints for the default target board, in CSV format.
+
+    This demo has only been tested on a single dev board: terasIC's DE-1,
+    with a Cyclone-II FPGA (EP2C20F484C7).
+
+    I have used the free Altera IDE (Altera Quartus II 9.0). This version of
+    Quartus does not even require a free license file and can be downloaded for
+    free from the altera web site. But if you have a DE-1 board on hand I guess
+    you already know that.
+
+    I assume you are familiar with Altera tools but anyway this is how to set up
+    a project using Quartus II:
+
+        1.- Create new project with the new project wizard
+            Top entity should be c2sb_demo
+            Suggested path is /syn/altera/<project name>
+        2.- Set target device as EP2C20F484C7
+            This choice determines speed grade and chip package
+        3.- 'Next' your way out of the new project wizard
+        4.- Add to the project all the vhdl files in /vhdl and /vhdl/demo
+            Select file c2sb_demo.vhdl as top
+        5.- Import pin constraints file (assignments->import assignments)
+        6.- Create a clock constraint for signal clk (52 MHz or some other
+            suitable speed which gives us some minimal slack).
+        7.- In the device settings window, click "Device and pin options..."
+        8.- Select tab "Dual-Purpose pins"
+        9.- Double-click on nCEO value column and select "use as regular I/O"
+            IMPORTANT: otherwise the synthesis will fail; we need to use a FPGA
+            pin that happens to be dual-purpose (programming and regular).
+        10.-Save the project and synthesize
+        11.-Make sure the clock constraint is met (timing analyzer report)
+        12.-If you have a terminal hooked to the serial port (19200/8/N/1) you
+            should see a welcome message after depressing the reset button.
+
+    In case you need to troubleshoot, my synthesis of the default demo is
+    like this:
+
+        - Selected optimization: area
+        - All other options: default
+        - 1214 LEs plus 43008 memory bits (that's 14 M4K blocks)
+        - Clock constraint met but not by much (~53 MHz)
+        - 17 warnings, mostly harmless (ugliest: unused pins, undeclared clock)
+
+    Note that none of the on-board goodies are used in the demo except as noted
+    in section 4.2 below.
+
+
+
+4.2.- Porting to other dev boards
+
+    The demo should be easily portable to any board which has all of this:
+
+        - An FPGA capable enough (the demo uses internal memory only)
+        - A reset pin (possibly a pushbutton)
+        - A clock input (uart modules assume 50MHz, see below)
+        - RXD and TXD UART pins, plus a connector, header or whatever
+
+    The only modules that care at all about clock rate are the UART
+    modules. They are hardwired to 19200 bauds when clocked at 50MHz, so if you
+    use a different frequency you must edit the constants in the uart files
+    accordingly.
+    Be aware that these uart modules have been used in other projects but have
+    seldom been tested with other than 50MHz clocks; they should work but you
+    have been warned.
+
+    The reset input is synchronized internally, you can use a raw pushbutton.
+
+    Assuming you take care of all of the above, the easiest way I see to port
+    the demo is just editing the top module ports ('/vhdl/demo/c2sb_demo.vhdl')
+    to match your board setup.
+
+    All the code in this project is vendor agnostic (or should be, I have only
+    tried it on Quartus and ISE). Specifically, it does not instance memory
+    blocks (relying instead on memory inference) or clock managers or buffers.
+
+
+
+
+5.- Tools
+================================================================================
+
+
+5.1.- MIPS software simulator
+
+    Plasma project includes a MIPS-I simulator made by Steve Rhoads, called
+    'mlite.c'. According the the author, it was used as a golden model for the
+    construction of the cpu, the same as I have done.
+    I have made some modifications on Rhoads' code, mostly for logging, and
+    called the new program 'slite' ('/tools/slite/src/slite.c').
+
+    The simulator is a single C file (slite.c) that should be compilable in
+    linux and win32 with no changes. I have only tested it in win32/cygwin.
+
+    The program has been hastily modified to accomodate the 'Modified Harvard'
+    architecture of the cpu (code and data are in separate buses and RAMs, but
+    in the same address spaces, so it's really a Modified Harvard with separate
+    storage) -- See section 2.1 about the buses.
+
+    It loads a 'code' binary file at address 0x0 and a 'data' binary file at
+    0x10000 and then starts execution at 0x0.
+    The linker script for the code samples makes sure all the data is linked
+    with the proper addresses and ends up in the data binary file, including
+    read-only data that would normally be bundled with code (see section 2.1).
+
+    Many system parameters are hardcoded, including the log file name, the
+    simulated memory size and the code and data addresses.
+    The only arguments it takes are the binary code and data files:
+
+    slite.exe <code binary file> <data binary file>
+
+    The files are assumed to be plain binary chunks of big-endian data that are
+    passed directly to the simulated cpu.
+
+    The simulation is logged in a text file with exactly the same format as
+    described in 3.2.1. It logs the exact same events so that the log file is
+    directly comparable to the modelsim simulation log, as explained in 3.2.
+
+    The hardcoded log file name is "sw_sim_log.txt".
+
+
+
+5.2.- Conversion script bin2hdl.py
+
+    This Python script reads two binary files (for the data and code images, as
+    explained above) and 'inserts' them in a vhdl template. It makes the
+    conversion from binary to vhdl strings and slices the data in byte columns,
+    as required by the RAM implementation (in which each byte in a word is
+    stored in a different RAM with a separate WE, 4 blocks in all).
+    The makefiles of the code samples can be used as an example. The script code
+    is simple enough to be understandable even if you don't know Python, and
+    includes some usage instructions.
+
+    The vhdl templates (/src/*_template.vhdl) have placeholder 'tags' that are
+    replaced with real application data by this script.
+
+    The tags are these:
+
+    "@code0@"               : Contents of RAM block for slice 0 (lsb) of code
+       ...
+    "@code3@"               : Contents of RAM block for slice 3 (msb) of code
+    "@data0@"               : Contents of RAM block for slice 0 (lsb) of data
+       ...
+    "@data3@"               : Contents of RAM block for slice 3 (msb) of data
+    "@entity_name@"         : Name of entity in target vhdl file
+    "@arch_name@"           : Name of architecture in target vhdl file
+    "@code_table_size@"     : Size of RAM block to be used for code, in words
+    "@code_addr_size@"      : ceil(log2(@code_table_size@))
+    "@data_table_size@"     : Size of RAM block to be used for data, in words
+    "@data_addr_size@"      : ceil(log2(@data_table_size@))
+
+    These placeholders will be replaced with object code or with data values
+    provided by the script command line (see makefiles).
+
+    The script has been used with Python 2.6.2. It should work with earlier
+    or later versions but I haven't tested.
+
+
+
+6.- Code samples
+================================================================================
+
+Directory /src directory contains a few test applications that can be simulated
+and run on real hardware, except for the opcode test which can only be
+simulated). See the readme file and the makefile for each program.
+
+The makefiles have been tested with the CodeSourcery toolchain for windows (that
+can be downloaded from www.codesourcery.com) and with the Buildroot toolchain
+for GNU/Linux.
+
+Most makefiles have two targets, to create a simulation test bench and a
+synthesizable demo.
+
+Target '*_sim' (e.g. 'hello_sim') will build the simulation test bench as vhdl
+file '/vhdl/tb/mips_tb1.vhdl'. This is the default test bench expected by the
+simulation script '/sim/mips_tb1.do'.
+
+Target '*_demo' will build a synthesizable demo as '/vhdl/demo/mips_mpu.vhdl'.
+
+The build process will produce two binary files '*.code' and '*.data' that can
+be run on the software simulator:
+
+    slite hello.code hello.data
+
+Plus a listing file (*.lst) handy for debugging.
+
+
+The python script 'bin2hdl.py' is used to insert binary data on vhdl templates.
+Assuming you have Python 2.5 or later in your machine, call the script with
+
+    python bin2hdl.py --help
+
+to get a short description (see section 5.2).
+
+(This section is copied in file '/src/readme.txt'.)
+
+
+REFERENCES 
+================================================================================
+[1] "See MIPS Run (2nd Edition)"
+    D. Sweetman
+    Elsevier 2007
+    
+[2] "IDT R30xx Family Software Reference Manual" 
+    Dominic Sweetman
+    Idt 1994 (freely available in pdf format)

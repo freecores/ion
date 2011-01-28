@@ -1,0 +1,1068 @@
+/*------------------------------------------------------------------------------
+* slite.c -- MIPS-I simulator based on Steve Rhoad's "mlite"
+*
+* This is a slightly modified version of Steve Rhoad's "mlite" simulator, which
+* is part of his PLASMA project (original date: 1/31/01).
+*
+*-------------------------------------------------------------------------------
+* Usage:
+*     slite <code file name> <data file name>
+*
+* The program will allocate a chunk of RAM (MEM_SIZE bytes) and map it to
+* address 0x00000000 of the simulated CPU.
+* Then it will read the 'code file' (as a big-endian plain binary) onto address
+* 0x0 of the simulated CPU memory, and 'data file' on address 0x10000.
+* Finally, will reset the CPU and enter the interactive debugger.
+*
+* (Note that the above is only necessary if the system does not have caches,
+* because of the Harvard architecture. With caches in place, program loading
+* would be antirely conventional).
+*
+* A simulation log file will be dumped to file "sw_sim_log.txt". This log can be
+* used to compare with an equivalent log dumped by the hardware simulation, as
+* a simple way to validate the hardware for a given program. See the project
+* readme files for details.
+*
+*-------------------------------------------------------------------------------
+* KNOWN BUGS:
+*
+* 1.- Load delay slot simulation does not work
+*
+* Some programs don't work when load delay slots are simulated (by setting
+* "s->load_delay_slot = 1" in function main).
+*
+* The actual HW core does no longer use load delay slots but load interlocking
+* so it may be better to just remove this feature.
+*
+*-------------------------------------------------------------------------------
+* @date 2011-jan-16
+*
+*-------------------------------------------------------------------------------
+* COPYRIGHT:    Software placed into the public domain by the author.
+*               Software 'as is' without warranty.  Author liable for nothing.
+*
+* IMPORTANT: Assumes host is little endian.
+*-----------------------------------------------------------------------------*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <assert.h>
+
+/** Set to !=0 to disable file logging */
+#define FILE_LOGGING_DISABLED (0)
+/** Define to enable cache simulation (unimplemented) */
+//#define ENABLE_CACHE
+
+
+#define MEM_SIZE (1024*1024*2)
+#define ntohs(A) ( ((A)>>8) | (((A)&0xff)<<8) )
+#define htons(A) ntohs(A)
+#define ntohl(A) ( ((A)>>24) | (((A)&0xff0000)>>8) | (((A)&0xff00)<<8) | ((A)<<24) )
+#define htonl(A) ntohl(A)
+
+/*---- OS-dependent support functions and definitions ------------------------*/
+#ifndef WIN32
+//Support for Linux
+#define putch putchar
+#include <termios.h>
+#include <unistd.h>
+
+void Sleep(unsigned int value)
+{
+   usleep(value * 1000);
+}
+
+int kbhit(void)
+{
+   struct termios oldt, newt;
+   struct timeval tv;
+   fd_set read_fd;
+
+   tcgetattr(STDIN_FILENO, &oldt);
+   newt = oldt;
+   newt.c_lflag &= ~(ICANON | ECHO);
+   tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+   tv.tv_sec=0;
+   tv.tv_usec=0;
+   FD_ZERO(&read_fd);
+   FD_SET(0,&read_fd);
+   if(select(1, &read_fd, NULL, NULL, &tv) == -1)
+      return 0;
+   //tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+   if(FD_ISSET(0,&read_fd))
+      return 1;
+   return 0;
+}
+
+int getch(void)
+{
+   struct termios oldt, newt;
+   int ch;
+
+   tcgetattr(STDIN_FILENO, &oldt);
+   newt = oldt;
+   newt.c_lflag &= ~(ICANON | ECHO);
+   tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+   ch = getchar();
+   //tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+   return ch;
+}
+#else
+//Support for Windows
+#include <conio.h>
+extern void __stdcall Sleep(unsigned long value);
+#endif
+/*---- End of OS-dependent support functions and definitions -----------------*/
+
+/*---- Hardware system parameters --------------------------------------------*/
+
+/* Much of this is a remnant from Plasma's mlite and is  no longer used. */
+/* FIXME Refactor HW system params */
+
+
+#define UART_WRITE        0x20000000
+#define UART_READ         0x20000000
+#define IRQ_MASK          0x20000010
+#define IRQ_STATUS        0x20000020
+#define CONFIG_REG        0x20000070
+#define MMU_PROCESS_ID    0x20000080
+#define MMU_FAULT_ADDR    0x20000090
+#define MMU_TLB           0x200000a0
+
+#define IRQ_UART_READ_AVAILABLE  0x001
+#define IRQ_UART_WRITE_AVAILABLE 0x002
+#define IRQ_COUNTER18_NOT        0x004
+#define IRQ_COUNTER18            0x008
+#define IRQ_MMU                  0x200
+
+#define MMU_ENTRIES 4
+#define MMU_MASK (1024*4-1)
+
+/** Length of debugging jump target queue */
+#define TRACE_BUFFER_SIZE (32)
+
+typedef struct {
+   unsigned int buf[TRACE_BUFFER_SIZE];   /**< queue of last jump targets */
+   unsigned int next;                     /**< internal queue head pointer */
+   FILE *log;                             /**< text log file or NULL */
+   int pr[32];                            /**< last value of register bank */
+   int hi, lo, epc;                       /**< last value of internal regs */
+} Trace;
+
+typedef struct
+{
+   unsigned int virtualAddress;
+   unsigned int physicalAddress;
+} MmuEntry;
+
+typedef struct {
+   int load_delay_slot;
+   int delay;
+   unsigned int delayed_reg;
+   int delayed_data;
+   int r[32];
+   int opcode;
+   int pc, pc_next, epc;
+   unsigned int hi;
+   unsigned int lo;
+   int status;
+   int userMode;
+   int processId;
+   int exceptionId;
+   int faultAddr;
+   int irqStatus;
+   int skip;
+   Trace t;
+   unsigned char *mem;
+   int wakeup;
+   int big_endian;
+   MmuEntry mmuEntry[MMU_ENTRIES];
+} State;
+
+static char *opcode_string[]={
+   "SPECIAL","REGIMM","J","JAL","BEQ","BNE","BLEZ","BGTZ",
+   "ADDI","ADDIU","SLTI","SLTIU","ANDI","ORI","XORI","LUI",
+   "COP0","COP1","COP2","COP3","BEQL","BNEL","BLEZL","BGTZL",
+   "?","?","?","?","?","?","?","?",
+   "LB","LH","LWL","LW","LBU","LHU","LWR","?",
+   "SB","SH","SWL","SW","?","?","SWR","CACHE",
+   "LL","LWC1","LWC2","LWC3","?","LDC1","LDC2","LDC3"
+   "SC","SWC1","SWC2","SWC3","?","SDC1","SDC2","SDC3"
+};
+
+static char *special_string[]={
+   "SLL","?","SRL","SRA","SLLV","?","SRLV","SRAV",
+   "JR","JALR","MOVZ","MOVN","SYSCALL","BREAK","?","SYNC",
+   "MFHI","MTHI","MFLO","MTLO","?","?","?","?",
+   "MULT","MULTU","DIV","DIVU","?","?","?","?",
+   "ADD","ADDU","SUB","SUBU","AND","OR","XOR","NOR",
+   "?","?","SLT","SLTU","?","DADDU","?","?",
+   "TGE","TGEU","TLT","TLTU","TEQ","?","TNE","?",
+   "?","?","?","?","?","?","?","?"
+};
+
+static char *regimm_string[]={
+   "BLTZ","BGEZ","BLTZL","BGEZL","?","?","?","?",
+   "TGEI","TGEIU","TLTI","TLTIU","TEQI","?","TNEI","?",
+   "BLTZAL","BEQZAL","BLTZALL","BGEZALL","?","?","?","?",
+   "?","?","?","?","?","?","?","?"
+};
+
+static unsigned int HWMemory[8];
+
+/*---- Local function prototypes ---------------------------------------------*/
+
+/* Debug and logging */
+void init_trace_buffer(State *s, const char *log_file_name);
+void close_trace_buffer(State *s);
+void dump_trace_buffer(State *s);
+void log_cycle(State *s);
+void log_read(State *s, int full_address, int word_value, int size, int log);
+
+/* Hardware simulation */
+int mem_read(State *s, int size, unsigned int address, int log);
+void mem_write(State *s, int size, int unsigned address, unsigned value);
+void start_load(State *s, int rt, int data);
+
+/*---- Local functions -------------------------------------------------------*/
+
+/** Log to file a memory read operation (not including target reg change) */
+void log_read(State *s, int full_address, int word_value, int size, int log){
+   if(s->t.log!=NULL && log!=0){
+      if(size==4){ size=0x04; }
+      else if(size==2){ size=0x02; }
+      else { size=0x01; }
+      fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD\n",
+              s->pc, full_address, /*size,*/ word_value);
+   }
+}
+
+/** Read memory, optionally logging */
+int mem_read(State *s, int size, unsigned int address, int log)
+{
+   unsigned int value=0, word_value=0, ptr;
+   unsigned int full_address = address;
+
+   s->irqStatus |= IRQ_UART_WRITE_AVAILABLE;
+   switch(address)
+   {
+      case UART_READ:
+         word_value = 0x00000001;
+         log_read(s, full_address, word_value, size, log);
+         return word_value;
+         /* FIXME Take input from text file */
+         /*
+         if(kbhit()){
+            HWMemory[0] = getch();
+         }
+         s->irqStatus &= ~IRQ_UART_READ_AVAILABLE; //clear bit
+         return HWMemory[0];
+         */
+      case IRQ_MASK:
+         return HWMemory[1];
+      case IRQ_MASK + 4:
+         Sleep(10);
+         return 0;
+      case IRQ_STATUS:
+         /*if(kbhit())
+            s->irqStatus |= IRQ_UART_READ_AVAILABLE;
+         return s->irqStatus;
+         */
+         /* FIXME Optionally simulate UART TX delay */
+         word_value = 0x00000003; /* Ready to TX and RX */
+         log_read(s, full_address, word_value, size, log);
+         return word_value;
+      case MMU_PROCESS_ID:
+         return s->processId;
+      case MMU_FAULT_ADDR:
+         return s->faultAddr;
+   }
+
+   ptr = (unsigned int)s->mem + (address % MEM_SIZE);
+
+   if(0x10000000 <= address && address < 0x10000000 + 1024*1024)
+      ptr += 1024*1024;
+
+   word_value = *(int*)(ptr&0xfffffffc);
+   if(s->big_endian)
+            word_value = ntohl(word_value);
+   switch(size)
+   {
+      case 4:
+         if(address & 3){
+            printf("Unaligned access PC=0x%x address=0x%x\n",
+                   (int)s->pc, (int)address);
+         }
+         assert((address & 3) == 0);
+         value = *(int*)ptr;
+         if(s->big_endian)
+            value = ntohl(value);
+         break;
+      case 2:
+         assert((address & 1) == 0);
+         value = *(unsigned short*)ptr;
+         if(s->big_endian)
+            value = ntohs((unsigned short)value);
+         break;
+      case 1:
+         value = *(unsigned char*)ptr;
+         break;
+      default:
+         printf("ERROR");
+   }
+
+   log_read(s, full_address, word_value, size, log);
+   return(value);
+}
+
+/** Write memory */
+void mem_write(State *s, int size, unsigned address, unsigned value)
+{
+   unsigned int ptr, mask, dvalue, b0, b1, b2, b3;
+
+   if(s->t.log!=NULL){
+      b0 = value & 0x000000ff;
+      b1 = value & 0x0000ff00;
+      b2 = value & 0x00ff0000;
+      b3 = value & 0xff000000;
+
+      switch(size){
+         case 4:  mask = 0x0f;
+                  dvalue = value;
+                  break;
+
+         case 2:  if((address&0x2)==0){
+                     mask = 0xc;
+                     dvalue = b1<<16 | b0<<16;
+                  }
+                  else{
+                     mask = 0x3;
+                     dvalue = b1 | b0;
+                  }
+                  break;
+         case 1:  switch(address%4){
+                  case 0 : mask = 0x8;
+                           dvalue = b0<<24;
+                           break;
+                  case 1 : mask = 0x4;
+                           dvalue = b0<<16;
+                           break;
+                  case 2 : mask = 0x2;
+                           dvalue = b0<<8;
+                           break;
+                  case 3 : mask = 0x1;
+                           dvalue = b0;
+                           break;
+                  }
+                  break;
+         default:
+            printf("BUG: mem write size invalid (%08x)\n", s->pc);
+            exit(2);
+
+      }
+      fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR\n", s->pc, address, mask, dvalue);
+   }
+
+   switch(address)
+   {
+      case UART_WRITE:
+         putch(value);
+         fflush(stdout);
+         return;
+      case IRQ_MASK:
+         HWMemory[1] = value;
+         return;
+      case IRQ_STATUS:
+         s->irqStatus = value;
+         return;
+      case CONFIG_REG:
+         return;
+      case MMU_PROCESS_ID:
+         //printf("processId=%d\n", value);
+         s->processId = value;
+         return;
+   }
+
+   if(MMU_TLB <= address && address <= MMU_TLB+MMU_ENTRIES * 8)
+   {
+      //printf("TLB 0x%x 0x%x\n", address - MMU_TLB, value);
+      ptr = (unsigned int)s->mmuEntry + address - MMU_TLB;
+      *(int*)ptr = value;
+      s->irqStatus &= ~IRQ_MMU;
+      return;
+   }
+
+   ptr = (unsigned int)s->mem + (address % MEM_SIZE);
+
+   if(0x10000000 <= address && address < 0x10000000 + 1024*1024)
+      ptr += 1024*1024;
+
+   switch(size)
+   {
+      case 4:
+         assert((address & 3) == 0);
+         if(s->big_endian)
+            value = htonl(value);
+         *(int*)ptr = value;
+         break;
+      case 2:
+         assert((address & 1) == 0);
+         if(s->big_endian)
+            value = htons((unsigned short)value);
+         *(short*)ptr = (unsigned short)value;
+         break;
+      case 1:
+         *(char*)ptr = (unsigned char)value;
+         break;
+      default:
+         printf("ERROR");
+   }
+}
+
+/*---- Optional MMU and cache implementation ---------------------------------*/
+
+/*
+   The actual core does not have a cache so all of the original Plasma mlite.c
+   code for cache simulation has been removed.
+*/
+
+#ifdef ENABLE_CACHE
+#error Cache simulation missing!
+#else
+static void cache_init(void) {}
+#endif
+/*---- End optional cache implementation -------------------------------------*/
+
+
+/** Simulates MIPS-I multiplier unsigned behavior*/
+void mult_big(unsigned int a,
+              unsigned int b,
+              unsigned int *hi,
+              unsigned int *lo)
+{
+   unsigned int ahi, alo, bhi, blo;
+   unsigned int c0, c1, c2;
+   unsigned int c1_a, c1_b;
+
+   ahi = a >> 16;
+   alo = a & 0xffff;
+   bhi = b >> 16;
+   blo = b & 0xffff;
+
+   c0 = alo * blo;
+   c1_a = ahi * blo;
+   c1_b = alo * bhi;
+   c2 = ahi * bhi;
+
+   c2 += (c1_a >> 16) + (c1_b >> 16);
+   c1 = (c1_a & 0xffff) + (c1_b & 0xffff) + (c0 >> 16);
+   c2 += (c1 >> 16);
+   c0 = (c1 << 16) + (c0 & 0xffff);
+   *hi = c2;
+   *lo = c0;
+}
+
+/** Simulates MIPS-I multiplier signed behavior*/
+void mult_big_signed(int a,
+                     int b,
+                     unsigned int *hi,
+                     unsigned int *lo)
+{
+   unsigned int ahi, alo, bhi, blo;
+   unsigned int c0, c1, c2;
+   unsigned int c1_a, c1_b;
+
+   ahi = a >> 16;
+   alo = a & 0xffff;
+   bhi = b >> 16;
+   blo = b & 0xffff;
+
+   c0 = alo * blo;
+   c1_a = ahi * blo;
+   c1_b = alo * bhi;
+   c2 = ahi * bhi;
+
+   c2 += (c1_a >> 16) + (c1_b >> 16);
+   c1 = (c1_a & 0xffff) + (c1_b & 0xffff) + (c0 >> 16);
+   c2 += (c1 >> 16);
+   c0 = (c1 << 16) + (c0 & 0xffff);
+   *hi = c2;
+   *lo = c0;
+}
+
+/** Load data from memory (used to simulate load delay slots) */
+void start_load(State *s, int rt, int data){
+   if(s->load_delay_slot){
+      s->delayed_reg = rt;
+      s->delay = 1;
+      s->delayed_data = data;
+   }
+   else{
+      /* load delay slot not simulated */
+      s->r[rt] = data;
+   }
+}
+
+/** Execute one cycle of the CPU (including any interlock stall cycles) */
+void cycle(State *s, int show_mode)
+{
+   unsigned int opcode;
+   unsigned int op, rs, rt, rd, re, func, imm, target;
+   int imm_sex;
+   int imm_shift, branch=0, lbranch=2, skip2=0;
+   int *r=s->r;
+   unsigned int *u=(unsigned int*)s->r;
+   unsigned int ptr, epc, rSave;
+
+   if(!show_mode){
+      log_cycle(s);
+   }
+
+   opcode = mem_read(s, 4, s->pc, 0);
+   op = (opcode >> 26) & 0x3f;
+   rs = (opcode >> 21) & 0x1f;
+   rt = (opcode >> 16) & 0x1f;
+   rd = (opcode >> 11) & 0x1f;
+   re = (opcode >> 6) & 0x1f;
+   func = opcode & 0x3f;
+   imm = opcode & 0xffff;
+   imm_sex = (imm&0x8000)? 0xffff0000 | imm : imm;
+   imm_shift = (((int)(short)imm) << 2) - 4;
+   target = (opcode << 6) >> 4;
+   ptr = (short)imm + r[rs];
+   r[0] = 0;
+   if(show_mode)
+   {
+      printf("%8.8x %8.8x ", s->pc, opcode);
+      if(op == 0)
+         printf("%8s ", special_string[func]);
+      else if(op == 1)
+         printf("%8s ", regimm_string[rt]);
+      else
+         printf("%8s ", opcode_string[op]);
+      printf("$%2.2d $%2.2d $%2.2d $%2.2d ", rs, rt, rd, re);
+      printf("%4.4x", imm);
+      if(show_mode == 1)
+         printf(" r[%2.2d]=%8.8x r[%2.2d]=%8.8x", rs, r[rs], rt, r[rt]);
+      printf("\n");
+   }
+   if(show_mode > 5)
+      return;
+   epc = s->pc + 4;
+   if(s->pc_next != s->pc + 4)
+      epc |= 2;  //branch delay slot
+
+   s->pc = s->pc_next;
+   s->pc_next = s->pc_next + 4;
+   if(s->skip)
+   {
+      s->skip = 0;
+      return;
+   }
+   rSave = r[rt];
+   switch(op)
+   {
+      case 0x00:/*SPECIAL*/
+         switch(func)
+         {
+            case 0x00:/*SLL*/  r[rd]=r[rt]<<re;          break;
+            case 0x02:/*SRL*/  r[rd]=u[rt]>>re;          break;
+            case 0x03:/*SRA*/  r[rd]=r[rt]>>re;          break;
+            case 0x04:/*SLLV*/ r[rd]=r[rt]<<r[rs];       break;
+            case 0x06:/*SRLV*/ r[rd]=u[rt]>>r[rs];       break;
+            case 0x07:/*SRAV*/ r[rd]=r[rt]>>r[rs];       break;
+            case 0x08:/*JR*/   s->pc_next=r[rs];         break;
+            case 0x09:/*JALR*/ r[rd]=s->pc_next; s->pc_next=r[rs]; break;
+            case 0x0a:/*MOVZ*/ if(!r[rt]) r[rd]=r[rs];   break;  /*IV*/
+            case 0x0b:/*MOVN*/ if(r[rt]) r[rd]=r[rs];    break;  /*IV*/
+            case 0x0c:/*SYSCALL*/ /* epc|=1; WHY? */
+                                  s->exceptionId=1; break;
+            case 0x0d:/*BREAK*/   /* epc|=1; WHY? */
+                                  s->exceptionId=1; break;
+            case 0x0f:/*SYNC*/ s->wakeup=1;              break;
+            case 0x10:/*MFHI*/ r[rd]=s->hi;              break;
+            case 0x11:/*FTHI*/ s->hi=r[rs];              break;
+            case 0x12:/*MFLO*/ r[rd]=s->lo;              break;
+            case 0x13:/*MTLO*/ s->lo=r[rs];              break;
+            case 0x18:/*MULT*/ mult_big_signed(r[rs],r[rt],&s->hi,&s->lo); break;
+            case 0x19:/*MULTU*/ mult_big(r[rs],r[rt],&s->hi,&s->lo); break;
+            case 0x1a:/*DIV*/  s->lo=r[rs]/r[rt]; s->hi=r[rs]%r[rt]; break;
+            case 0x1b:/*DIVU*/ s->lo=u[rs]/u[rt]; s->hi=u[rs]%u[rt]; break;
+            case 0x20:/*ADD*/  r[rd]=r[rs]+r[rt];        break;
+            case 0x21:/*ADDU*/ r[rd]=r[rs]+r[rt];        break;
+            case 0x22:/*SUB*/  r[rd]=r[rs]-r[rt];        break;
+            case 0x23:/*SUBU*/ r[rd]=r[rs]-r[rt];        break;
+            case 0x24:/*AND*/  r[rd]=r[rs]&r[rt];        break;
+            case 0x25:/*OR*/   r[rd]=r[rs]|r[rt];        break;
+            case 0x26:/*XOR*/  r[rd]=r[rs]^r[rt];        break;
+            case 0x27:/*NOR*/  r[rd]=~(r[rs]|r[rt]);     break;
+            case 0x2a:/*SLT*/  r[rd]=r[rs]<r[rt];        break;
+            case 0x2b:/*SLTU*/ r[rd]=u[rs]<u[rt];        break;
+            case 0x2d:/*DADDU*/r[rd]=r[rs]+u[rt];        break;
+            case 0x31:/*TGEU*/ break;
+            case 0x32:/*TLT*/  break;
+            case 0x33:/*TLTU*/ break;
+            case 0x34:/*TEQ*/  break;
+            case 0x36:/*TNE*/  break;
+            default: printf("ERROR0(*0x%x~0x%x)\n", s->pc, opcode);
+               s->wakeup=1;
+         }
+         break;
+      case 0x01:/*REGIMM*/
+         switch(rt) {
+            case 0x10:/*BLTZAL*/ r[31]=s->pc_next;
+            case 0x00:/*BLTZ*/   branch=r[rs]<0;    break;
+            case 0x11:/*BGEZAL*/ r[31]=s->pc_next;
+            case 0x01:/*BGEZ*/   branch=r[rs]>=0;   break;
+            case 0x12:/*BLTZALL*/r[31]=s->pc_next;
+            case 0x02:/*BLTZL*/  lbranch=r[rs]<0;   break;
+            case 0x13:/*BGEZALL*/r[31]=s->pc_next;
+            case 0x03:/*BGEZL*/  lbranch=r[rs]>=0;  break;
+            default: printf("ERROR1\n"); s->wakeup=1;
+          }
+         break;
+      case 0x03:/*JAL*/    r[31]=s->pc_next;
+      case 0x02:/*J*/      s->pc_next=(s->pc&0xf0000000)|target; break;
+      case 0x04:/*BEQ*/    branch=r[rs]==r[rt];     break;
+      case 0x05:/*BNE*/    branch=r[rs]!=r[rt];     break;
+      case 0x06:/*BLEZ*/   branch=r[rs]<=0;         break;
+      case 0x07:/*BGTZ*/   branch=r[rs]>0;          break;
+      case 0x08:/*ADDI*/   r[rt]=r[rs]+(short)imm;  break;
+      case 0x09:/*ADDIU*/  u[rt]=u[rs]+(short)imm;  break;
+      case 0x0a:/*SLTI*/   r[rt]=r[rs]<(short)imm;  break;
+      case 0x0b:/*SLTIU*/  u[rt]=u[rs]<(unsigned int)(short)imm; break;
+      case 0x0c:/*ANDI*/   r[rt]=r[rs]&imm;         break;
+      case 0x0d:/*ORI*/    r[rt]=r[rs]|imm;         break;
+      case 0x0e:/*XORI*/   r[rt]=r[rs]^imm;         break;
+      case 0x0f:/*LUI*/    r[rt]=(imm<<16);         break;
+      case 0x10:/*COP0*/
+         if((opcode & (1<<23)) == 0)  //move from CP0
+         {
+            if(rd == 12)
+               r[rt]=s->status;
+            else
+               r[rt]=s->epc;
+         }
+         else                         //move to CP0
+         {
+            s->status=r[rt]&1;
+            if(s->processId && (r[rt]&2))
+            {
+               s->userMode|=r[rt]&2;
+               //printf("CpuStatus=%d %d %d\n", r[rt], s->status, s->userMode);
+               //s->wakeup = 1;
+               //printf("pc=0x%x\n", epc);
+            }
+         }
+         break;
+//      case 0x11:/*COP1*/ break;
+//      case 0x12:/*COP2*/ break;
+//      case 0x13:/*COP3*/ break;
+      case 0x14:/*BEQL*/   lbranch=r[rs]==r[rt];    break;
+      case 0x15:/*BNEL*/   lbranch=r[rs]!=r[rt];    break;
+      case 0x16:/*BLEZL*/  lbranch=r[rs]<=0;        break;
+      case 0x17:/*BGTZL*/  lbranch=r[rs]>0;         break;
+//      case 0x1c:/*MAD*/  break;   /*IV*/
+      case 0x20:/*LB*/     //r[rt]=(signed char)mem_read(s,1,ptr,1);  break;
+                           start_load(s, rt,(signed char)mem_read(s,1,ptr,1));
+                           break;
+
+      case 0x21:/*LH*/     //r[rt]=(signed short)mem_read(s,2,ptr,1); break;
+                           start_load(s, rt, (signed short)mem_read(s,2,ptr,1));
+                           break;
+      case 0x22:/*LWL*/    //target=8*(ptr&3);
+                           //r[rt]=(r[rt]&~(0xffffffff<<target))|
+                           //      (mem_read(s,4,ptr&~3)<<target); break;
+                           break;
+      case 0x23:/*LW*/     //r[rt]=mem_read(s,4,ptr,1);   break;
+                           start_load(s, rt, mem_read(s,4,ptr,1));
+                           break;
+      case 0x24:/*LBU*/    //r[rt]=(unsigned char)mem_read(s,1,ptr,1); break;
+                           start_load(s, rt, (unsigned char)mem_read(s,1,ptr,1));
+                           break;
+      case 0x25:/*LHU*/    //r[rt]= (unsigned short)mem_read(s,2,ptr,1);
+                           start_load(s, rt, (unsigned short)mem_read(s,2,ptr,1));
+                           break;
+      case 0x26:/*LWR*/
+                           //target=32-8*(ptr&3);
+                           //r[rt]=(r[rt]&~((unsigned int)0xffffffff>>target))|
+                           //((unsigned int)mem_read(s,4,ptr&~3)>>target);
+                           break;
+      case 0x28:/*SB*/     mem_write(s,1,ptr,r[rt]);  break;
+      case 0x29:/*SH*/     mem_write(s,2,ptr,r[rt]);  break;
+      case 0x2a:/*SWL*/
+                           //mem_write(s,1,ptr,r[rt]>>24);
+                           //mem_write(s,1,ptr+1,r[rt]>>16);
+                           //mem_write(s,1,ptr+2,r[rt]>>8);
+                           //mem_write(s,1,ptr+3,r[rt]); break;
+      case 0x2b:/*SW*/     mem_write(s,4,ptr,r[rt]);  break;
+      case 0x2e:/*SWR*/    break; //fixme
+      case 0x2f:/*CACHE*/  break;
+      case 0x30:/*LL*/     //r[rt]=mem_read(s,4,ptr);   break;
+                           start_load(s, rt, mem_read(s,4,ptr,1));
+                           break;
+
+//      case 0x31:/*LWC1*/ break;
+//      case 0x32:/*LWC2*/ break;
+//      case 0x33:/*LWC3*/ break;
+//      case 0x35:/*LDC1*/ break;
+//      case 0x36:/*LDC2*/ break;
+//      case 0x37:/*LDC3*/ break;
+//      case 0x38:/*SC*/     *(int*)ptr=r[rt]; r[rt]=1; break;
+      case 0x38:/*SC*/     mem_write(s,4,ptr,r[rt]); r[rt]=1; break;
+//      case 0x39:/*SWC1*/ break;
+//      case 0x3a:/*SWC2*/ break;
+//      case 0x3b:/*SWC3*/ break;
+//      case 0x3d:/*SDC1*/ break;
+//      case 0x3e:/*SDC2*/ break;
+//      case 0x3f:/*SDC3*/ break;
+      default: printf("ERROR2 address=0x%x opcode=0x%x\n", s->pc, opcode);
+         s->wakeup=1;
+   }
+   s->pc_next += (branch || lbranch == 1) ? imm_shift : 0;
+   s->pc_next &= ~3;
+   s->skip = (lbranch == 0) | skip2;
+
+   /* if there's a delayed load pending, do it now: load reg with memory data */
+   if(s->load_delay_slot){
+      /*--- simulate real core's load interlock ---*/
+      if(s->delay<=0){
+         if(s->delayed_reg>0){
+            s->r[s->delayed_reg] = s->delayed_data;
+         }
+         s->delayed_reg = 0;
+      }
+      else{
+         s->delay = s->delay - 1;
+      }
+   }
+   else{
+      /*--- delay slot or interlocking not simulated ---*/
+      /*
+      if(s->delay){
+         r[s->delayed_reg] = s->delayed_data;
+         s->delay=0;
+      }
+      */
+   }
+
+   if(s->exceptionId)
+   {
+      r[rt] = rSave;
+      s->epc = epc;
+      s->pc_next = 0x3c;
+      s->skip = 1;
+      s->exceptionId = 0;
+      s->userMode = 0;
+      //s->wakeup = 1;
+      return;
+   }
+}
+
+/** Dump CPU state to console */
+void show_state(State *s)
+{
+   int i,j;
+   printf("pid=%d userMode=%d, epc=0x%x\n", s->processId, s->userMode, s->epc);
+   for(i = 0; i < 4; ++i)
+   {
+      printf("%2.2d ", i * 8);
+      for(j = 0; j < 8; ++j)
+      {
+         printf("%8.8x ", s->r[i*8+j]);
+      }
+      printf("\n");
+   }
+   //printf("%8.8lx %8.8lx %8.8lx %8.8lx\n", s->pc, s->pc_next, s->hi, s->lo);
+   j = s->pc;
+   for(i = -4; i <= 8; ++i)
+   {
+      printf("%c", i==0 ? '*' : ' ');
+      s->pc = j + i * 4;
+      cycle(s, 10);
+   }
+   s->pc = j;
+}
+
+/** Show debug monitor prompt and execute user command */
+void do_debug(State *s)
+{
+   int ch;
+   int i, j=0, watch=0, addr;
+   s->pc_next = s->pc + 4;
+   s->skip = 0;
+   s->delayed_reg = 0;
+   s->wakeup = 0;
+   show_state(s);
+   ch = ' ';
+   for(;;)
+   {
+      if(ch != 'n')
+      {
+         if(watch)
+            printf("0x%8.8x=0x%8.8x\n", watch, mem_read(s, 4, watch,0));
+         printf("1=Debug 2=Trace 3=Step 4=BreakPt 5=Go 6=Memory ");
+         printf("7=Watch 8=Jump 9=Quit A=dump > ");
+      }
+      ch = getch();
+      if(ch != 'n')
+         printf("\n");
+      switch(ch)
+      {
+      case 'a': case 'A':
+         dump_trace_buffer(s); break;
+      case '1': case 'd': case ' ':
+         cycle(s, 0); show_state(s); break;
+      case 'n':
+         cycle(s, 1); break;
+      case '2': case 't':
+         cycle(s, 0); printf("*"); cycle(s, 10); break;
+      case '3': case 's':
+         printf("Count> ");
+         scanf("%d", &j);
+         for(i = 0; i < j; ++i)
+            cycle(s, 1);
+         show_state(s);
+         break;
+      case '4': case 'b':
+         printf("Line> ");
+         scanf("%x", &j);
+         printf("break point=0x%x\n", j);
+         break;
+      case '5': case 'g':
+         s->wakeup = 0;
+         cycle(s, 0);
+         while(s->wakeup == 0)
+         {
+            if(s->pc == j){
+               printf("\n\nStop: pc = 0x%08x\n\n", j);
+               break;
+            }
+            cycle(s, 0);
+         }
+         show_state(s);
+         break;
+      case 'G':
+         s->wakeup = 0;
+         cycle(s, 1);
+         while(s->wakeup == 0)
+         {
+            if(s->pc == j)
+               break;
+            cycle(s, 1);
+         }
+         show_state(s);
+         break;
+      case '6': case 'm':
+         printf("Memory> ");
+         scanf("%x", &j);
+         for(i = 0; i < 8; ++i)
+         {
+            printf("%8.8x ", mem_read(s, 4, j+i*4, 0));
+         }
+         printf("\n");
+         break;
+      case '7': case 'w':
+         printf("Watch> ");
+         scanf("%x", &watch);
+         break;
+      case '8': case 'j':
+         printf("Jump> ");
+         scanf("%x", &addr);
+         s->pc = addr;
+         s->pc_next = addr + 4;
+         show_state(s);
+         break;
+      case '9': case 'q':
+         return;
+      }
+   }
+}
+
+/** Read binary code and data files */
+int read_program(State *s, char *code_name, char *data_name){
+   FILE *in;
+   int bytes, i;
+   unsigned char *buffer;
+
+   /* Read code file (.text + .reginfo + .rodata) */
+   in = fopen(code_name, "rb");
+   if(in == NULL)
+   {
+      printf("Can't open file %s!\n",code_name);
+      getch();
+      return(0);
+   }
+   bytes = fread(s->mem, 1, MEM_SIZE, in);
+   fclose(in);
+   in = NULL;
+   printf("Code [size= %6d, start= 0x%08x]\n", bytes, 0);
+
+   /* Read data file (.data + .bss) if necessary */
+   if(data_name!=NULL){
+      in = fopen(data_name, "rb");
+      if(in == NULL)
+      {
+         printf("Can't open file %s!\n",data_name);
+         getch();
+         return(0);
+      }
+      /* FIXME Section '.data' start hardcoded to 0x10000 */
+      buffer = (unsigned char*)malloc(MEM_SIZE);
+
+      bytes = fread(buffer, 1, MEM_SIZE, in);
+      fclose(in);
+      printf("Data [size= %6d, start= 0x%08x]\n", bytes, 0x10000);
+
+      for(i=0;i<bytes;i++){
+         s->mem[0x10000+i] = buffer[i];
+      }
+      free(buffer);
+   }
+
+   return 1;
+}
+
+/*----------------------------------------------------------------------------*/
+
+int main(int argc,char *argv[])
+{
+   State state, *s=&state;
+   int index;
+   char *code_filename;
+   char *data_filename;
+
+   printf("MIPS-I emulator\n");
+   memset(s, 0, sizeof(State));
+   s->big_endian = 1;
+   s->load_delay_slot = 0;
+   s->mem = (unsigned char*)malloc(MEM_SIZE);
+   memset(s->mem, 0, MEM_SIZE);
+
+
+   if(argc==3){
+      code_filename = argv[1];
+      data_filename = argv[2];
+   }
+   else if(argc==2){
+      code_filename = argv[1];
+      data_filename = NULL;
+   }
+   else{
+      printf("Usage:");
+      printf("    slite file.exe <bin code file> [<bin data file>]\n");
+      return 0;
+   }
+
+   if(!read_program(s, code_filename, data_filename)) return 0;
+
+   init_trace_buffer(s, "sw_sim_log.txt");
+   memcpy(s->mem + 1024*1024, s->mem, 1024*1024);  //internal 8KB SRAM
+   cache_init(); /* stub */
+
+   /* NOTE: Original mlite supported loading little-endian code, which this
+      program doesn't. The endianess-conversion code has been removed.
+   */
+
+   /* Simulate a CPU reset */
+   s->pc = 0x0;
+   /* FIXME PC fixup at address zero has to be removed */
+   index = mem_read(s, 4, 0, 0);
+   if((index & 0xffffff00) == 0x3c1c1000){
+      s->pc = 0x10000000;
+   }
+
+   /* Enter debug command interface; will only exit clean with user command */
+   do_debug(s);
+
+   /* Close and deallocate everything and quit */
+   close_trace_buffer(s);
+   free(s->mem);
+   return(0);
+}
+
+/*----------------------------------------------------------------------------*/
+
+
+void init_trace_buffer(State *s, const char *log_file_name){
+   int i;
+
+#if FILE_LOGGING_DISABLED
+   s->t.log = NULL;
+   return;
+#else
+   for(i=0;i<TRACE_BUFFER_SIZE;i++){
+      s->t.buf[i]=0xffffffff;
+   }
+   s->t.next = 0;
+
+   /* if file logging is enabled, open log file */
+   if(log_file_name!=NULL){
+      s->t.log = fopen(log_file_name, "w");
+      if(s->t.log==NULL){
+         printf("Error opening log file '%s', file logging disabled\n", log_file_name);
+      }
+   }
+   else{
+      s->t.log = NULL;
+   }
+#endif
+}
+
+/** Dumps last jump targets as a chunk of hex numbers (older is left top) */
+void dump_trace_buffer(State *s){
+   int i, col;
+
+   for(i=0, col=0;i<TRACE_BUFFER_SIZE;i++, col++){
+      printf("%08x ", s->t.buf[s->t.next + i]);
+      if((col % 8)==7){
+         printf("\n");
+      }
+   }
+}
+
+/** Logs last cycle's activity (changes in state and/or loads/stores) */
+void log_cycle(State *s){
+   static unsigned int last_pc = 0;
+   int i;
+
+   /* store PC in trace buffer only if there was a jump */
+   if(s->pc != (last_pc+4)){
+      s->t.buf[s->t.next] = s->pc;
+      s->t.next = (s->t.next + 1) % TRACE_BUFFER_SIZE;
+   }
+   last_pc = s->pc;
+
+   /* if file logging is enabled, dump a trace log to file */
+   if(s->t.log!=NULL){
+      for(i=0;i<32;i++){
+         if(s->t.pr[i] != s->r[i]){
+            fprintf(s->t.log, "(%08X) [%02X]=%08X\n", s->pc, i, s->r[i]);
+         }
+         s->t.pr[i] = s->r[i];
+      }
+      if(s->lo != s->t.lo){
+         fprintf(s->t.log, "(%08X) [LO]=%08X\n", s->pc, s->lo);
+      }
+      s->t.lo = s->lo;
+
+      if(s->hi != s->t.hi){
+         fprintf(s->t.log, "(%08X) [HI]=%08X\n", s->pc, s->hi);
+      }
+      s->t.hi = s->hi;
+
+      if(s->epc != s->t.epc){
+         fprintf(s->t.log, "(%08X) [EP]=%08X\n", s->pc, s->epc);
+      }
+      s->t.epc = s->epc;
+   }
+}
+
+/** Frees debug buffers and closes log file */
+void close_trace_buffer(State *s){
+   if(s->t.log){
+      fclose(s->t.log);
+   }
+}

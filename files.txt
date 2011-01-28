@@ -1,0 +1,82 @@
+Summary of the directories and files in this project. 
+
+
+./
+================================================================================
+./files.txt                 This file
+./readme.txt                Quick start
+
+
+
+./doc                       Documentation
+================================================================================
+ion_project.txt             Provisional documentation in plain ascii.
+
+
+
+./src                       C and assembler sources for some tests and demos
+================================================================================
+readme.txt                  Short usage instructions for the code samples
+bin2hdl.py                  Python script that builds vhdl tables from bin files
+ion_noxram.lds              Load script for default bare system configuration
+mips_mpu_template.vhdl      Template for mpu system used in hardware demo
+mips_tb1_template.vhdl      Template for simulation test bench (main template)
+mips_tb0_template.vhdl      Template for sim. test bench (single memory block)
+
+./src/common                Source files common to all samples
+--------------------------------------------------------------------------------
+makefile                    Makefile included from all other makefiles
+boot.s                      Startup code
+plasma.h                    System definitions (lifted from Plasma project)
+rtos.h                      More system definitions (lifted from Plasma project)
+math.c                      Floating point & mul/div replacement functions
+no_os.c                     Replacement for some common libc functions
+
+./src/opcodes
+--------------------------------------------------------------------------------
+makefile                    Makefile
+opcodes.s                   Opcode test source file
+
+./src/hello                 Hello World sample
+--------------------------------------------------------------------------------
+makefile                    Makefile
+hello.c                     Prints a welcome message on a terminal
+
+
+
+./vhdl                      VHDL sources
+================================================================================
+mips_pkg.vhdl               Package with declarations common to all modules
+mips_cpu.vhdl               Main CPU core module (excludes caches)
+mips_shifter.vhdl           Barrel shifter module
+mips_alu.vhdl               ALU module
+
+./vhdl/tb                   VHDL source for simulation test bench
+--------------------------------------------------------------------------------
+txt_util.vhdl               Utility functions for string handling
+mips_tb1.vhdl               Simulation test bench (see ./doc/ion_project.txt)
+
+./vhdl/demo                 Source files for hardware demo on DE-1 board
+--------------------------------------------------------------------------------
+c2sb_demo.csv               Assignments file to be imported from Altera IDE
+c2sb_demo.vhdl              Top level source of demo
+mips_mpu.vhdl               Basic MPU system (see ./doc/ion.project.txt)
+rx232_rx.vhdl               Barebones UART module for RX
+rx232_tx.vhdl               Barebones UART module for TX
+
+
+
+./sim                       Simulation scripts for Modelsim (tcl)
+================================================================================
+mips_tb1.do                 Runs test bench /vhdl/tb/mips_tb1.vhdl
+mips_tb1_wave.do            Sub-script used to set-up Modelsim's wave window
+
+
+
+./syn                       Simulation and synthesis runtime stuff
+================================================================================
+Simulation scripts are assumed to run from here (see ./sim/readme.txt).
+Besides, here is where I put the synthesis stuff.
+This directory is versioned but contents are not.
+
+
