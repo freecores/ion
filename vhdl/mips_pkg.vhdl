@@ -35,4 +35,17 @@ type t_alu_flags is record
     inp1_eq_inp2 :      std_logic;
 end record t_alu_flags;
 
+-- 32-cycle mul/div module control. Bits 4-3 & 1-0 of IR.
+subtype t_mult_function is std_logic_vector(3 downto 0);
+constant MULT_NOTHING       : t_mult_function := "0000";
+constant MULT_READ_LO       : t_mult_function := "1010"; -- 18
+constant MULT_READ_HI       : t_mult_function := "1000"; -- 16
+constant MULT_WRITE_LO      : t_mult_function := "1011"; -- 19
+constant MULT_WRITE_HI      : t_mult_function := "1001"; -- 17
+constant MULT_MULT          : t_mult_function := "1101"; -- 25
+constant MULT_SIGNED_MULT   : t_mult_function := "1100"; -- 24
+constant MULT_DIVIDE        : t_mult_function := "1111"; -- 26
+constant MULT_SIGNED_DIVIDE : t_mult_function := "1110"; -- 27
+
+
 end package;

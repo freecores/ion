@@ -122,7 +122,6 @@ signal p1_ac :              t_alu_control;
 signal p1_alu_flags :       t_alu_flags;
 -- immediate data, sign- or zero-extended as required by IR
 signal p1_data_imm :        t_word;
-signal p1_muldiv_result :   t_dword;
 signal p1_branch_offset :   t_pc;
 signal p1_branch_offset_sex:std_logic_vector(31 downto 18);
 signal p1_rbank_rs_hazard : std_logic;
@@ -159,9 +158,17 @@ signal p1_jump_cond_sel :   std_logic_vector(2 downto 0);
 signal p1_data_addr :       t_addr;
 signal p1_data_offset :     t_addr;
 
+signal p1_muldiv_result :   t_word;
+signal p1_muldiv_func :     t_mult_function; 
+signal p1_muldiv_running :  std_logic;
+signal p1_muldiv_started :  std_logic;
+signal p1_muldiv_stall :    std_logic;
+
+
 --------------------------------------------------------------------------------
 -- Pipeline stage 2
 
+signal p2_muldiv_started :  std_logic;
 signal p2_exception :       std_logic;
 signal p2_rd_addr :         std_logic_vector(1 downto 0);
 signal p2_rd_mux_control :  std_logic_vector(3 downto 0);
@@ -183,13 +190,6 @@ signal stall_pipeline :     std_logic;
 signal pipeline_stalled :   std_logic;
 -- pipeline is stalled because of a load instruction interlock
 signal pipeline_interlocked:std_logic;
-
-
---------------------------------------------------------------------------------
--- Multiplier interface registers
-
-signal mdiv_hi_reg :        t_word;
-signal mdiv_lo_reg :        t_word;
 
 --------------------------------------------------------------------------------
 -- CP0 registers and signals
@@ -326,10 +326,10 @@ with p1_do_zero_ext_imm select p1_data_imm(31 downto 16) <=
 p1_alu_inp1 <= p1_rs;
 
 with p1_alu_op2_sel select p1_alu_inp2 <= 
-    p1_data_imm                     when "11",
-    p1_muldiv_result(63 downto 32)  when "01",
-    p1_muldiv_result(31 downto  0)  when "10",
-    p1_rt              when others;
+    p1_data_imm         when "11",
+    p1_muldiv_result    when "01", -- FIXME mux input wasted!
+    p1_muldiv_result    when "10",
+    p1_rt               when others;
 
 alu_inst : entity work.mips_alu
     port map (
@@ -347,23 +347,56 @@ alu_inst : entity work.mips_alu
 --------------------------------------------------------------------------------
 -- Mul/Div block interface
 
--- FIXME when MUL*/DIV* are implemented, these registers and the load enable
--- logic will change a little. It may be better to move them into the alu.
-mult_registers:
-process(clk)
-begin
-    if clk'event and clk='1' then
-        -- MTHI, MTLO are never involved in stall cycles, no need to check
-        if p1_load_hi='1' then
-            mdiv_hi_reg <= p1_rs;
-        end if;
-        if p1_load_lo='1' then
-            mdiv_lo_reg <= p1_rs;
-        end if;
-    end if;
-end process mult_registers;
+-- Compute the mdiv block function word. If p1_muldiv_func has any value other
+-- than MULT_NOTHING a new mdiv operation will start, truncating whatever other
+-- operation that may have been in course.
+-- So we encode here the function to be performed and make sure the value stays
+-- there for only one cycle (the first ALU cycle of the mul/div instruction).
 
-p1_muldiv_result <= mdiv_hi_reg & mdiv_lo_reg; -- FIXME stub, mdiv missing
+-- This will be '1' for all mul/div operations other than NOP...
+p1_muldiv_func(3) <= '1' when p1_op_special='1' and 
+                              p1_ir_fn(5 downto 4)="01" and
+                              -- ...but only if the mdiv is not already running
+                              p2_muldiv_started = '0' and
+                              p1_muldiv_running ='0'
+                      else '0';
+
+-- When bit(3) is zero, the rest are zeroed too. Otherwise, they come from IR
+p1_muldiv_func(2 downto 0) <= 
+    p1_ir_fn(3) & p1_ir_fn(1 downto 0) when p1_muldiv_func(3)='1'
+    else "000";
+
+mult_div: entity work.mips_mult
+    port map (
+        a           => p1_rs,
+        b           => p1_rt,
+        c_mult      => p1_muldiv_result,
+        pause_out   => p1_muldiv_running,
+        mult_func   => p1_muldiv_func,
+        clk         => clk,
+        reset_in    => reset
+    );
+
+-- Active only for the 1st ALU cycle of any mul/div instruction
+p1_muldiv_started <= '1' when p1_op_special='1' and 
+                              p1_ir_fn(5 downto 3)="011" and
+                              -- 
+                              p1_muldiv_running='0'
+                      else '0';
+
+-- Stall the pipeline to enable mdiv operation completion.
+-- We need p2_muldiv_started to distinguish the cycle before p1_muldiv_running
+-- is asserted and the cycle after it deasserts.
+-- Otherwise we would reexecute the same muldiv endlessly instruction after 
+-- deassertion of p1_muldiv_running, since the IR was stalled and still contains 
+-- the mul opcode...
+p1_muldiv_stall <= '1' when
+        -- Active for the cycle immediately before p1_muldiv_running asserts
+        -- and NOT for the cycle after it deasserts
+        (p1_muldiv_started='1' and p2_muldiv_started='0') or
+        -- Active until operation is complete
+        p1_muldiv_running = '1'
+        else '0';
 
 
 --##############################################################################
@@ -636,6 +669,18 @@ begin
     end if;
 end process pipeline_stage1_register;
 
+pipeline_stage1_register2:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            p2_muldiv_started <= '0';
+        else
+            p2_muldiv_started <= p1_muldiv_running;
+        end if;
+    end if;
+end process pipeline_stage1_register2;
+
 
 -- Stage 2 pipeline register. Split in two for convenience.
 -- This register deals with two kinds of stalls:
@@ -721,7 +766,7 @@ begin
 end process pipeline_stall_registers;
 
 -- FIXME make sure this combinational will not have bad glitches
-stall_pipeline <= mem_wait or load_interlock;
+stall_pipeline <= mem_wait or load_interlock or p1_muldiv_stall;
 
 
 -- FIXME load interlock should happen only if the instruction following 
