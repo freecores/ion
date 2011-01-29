@@ -46,6 +46,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
@@ -511,26 +512,20 @@ void mult_big_signed(int a,
                      unsigned int *hi,
                      unsigned int *lo)
 {
-   unsigned int ahi, alo, bhi, blo;
-   unsigned int c0, c1, c2;
-   unsigned int c1_a, c1_b;
+   int64_t xa, xb, xr, temp;
+   int32_t rh, rl;
 
-   ahi = a >> 16;
-   alo = a & 0xffff;
-   bhi = b >> 16;
-   blo = b & 0xffff;
+   xa = a;
+   xb = b;
+   xr = xa * xb;
 
-   c0 = alo * blo;
-   c1_a = ahi * blo;
-   c1_b = alo * bhi;
-   c2 = ahi * bhi;
+   temp = (xr >> 32) & 0xffffffff;
+   rh = temp;
+   temp = (xr >> 0) & 0xffffffff;
+   rl = temp;
 
-   c2 += (c1_a >> 16) + (c1_b >> 16);
-   c1 = (c1_a & 0xffff) + (c1_b & 0xffff) + (c0 >> 16);
-   c2 += (c1 >> 16);
-   c0 = (c1 << 16) + (c0 & 0xffff);
-   *hi = c2;
-   *lo = c0;
+   *hi = rh;
+   *lo = rl;
 }
 
 /** Load data from memory (used to simulate load delay slots) */
