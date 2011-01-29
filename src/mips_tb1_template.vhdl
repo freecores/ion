@@ -86,6 +86,7 @@ signal test :               integer := 0;
 signal rbank :              t_rbank;
 signal pc, cp0_epc :        std_logic_vector(31 downto 2);
 signal reg_hi, reg_lo :     t_word;
+signal negate_reg_lo :      std_logic;
 signal ld_upper_byte :      std_logic;
 signal ld_upper_hword :     std_logic;
 
@@ -281,8 +282,10 @@ begin
     begin
         init_signal_spy("/@entity_name@/uut/p1_rbank", "rbank", 0, -1);
         init_signal_spy("/@entity_name@/uut/p0_pc_reg", "pc", 0, -1);
-        init_signal_spy("/@entity_name@/uut/mdiv_hi_reg", "reg_hi", 0, -1);
-        init_signal_spy("/@entity_name@/uut/mdiv_lo_reg", "reg_lo", 0, -1);
+        init_signal_spy("/@entity_name@/uut/mult_div/upper_reg", "reg_hi", 0, -1);
+        init_signal_spy("/@entity_name@/uut/mult_div/lower_reg", "reg_lo", 0, -1);
+        init_signal_spy("/@entity_name@/uut/mult_div/negate_reg", "negate_reg_lo", 0, -1);
+        init_signal_spy("/@entity_name@/uut/mult_div/negate_reg", "negate_reg_lo", 0, -1);
         init_signal_spy("/@entity_name@/uut/cp0_epc", "cp0_epc", 0, -1);
         init_signal_spy("/@entity_name@/uut/p2_ld_upper_byte", "ld_upper_byte", 0, -1);
         init_signal_spy("/@entity_name@/uut/p2_ld_upper_byte", "ld_upper_hword", 0, -1);
@@ -342,7 +345,17 @@ begin
 
                 -- log aux register changes
                 if prev_hi /= reg_hi and reg_hi(0)/='U' then
-                    print(l_file, "("& hstr(full_pc)& ") [HI]="& hstr(reg_hi));
+                    -- we're observing the value of reg_lo, but the mult core
+                    -- will output the negated value in some cases. We
+                    -- have to mimic that behavior.
+                    if negate_reg_lo='1' then
+                        -- negate reg_lo before displaying
+                        prev_lo := not reg_lo;
+                        prev_lo := prev_lo + 1;
+                        print(l_file, "("& hstr(full_pc)& ") [LO]="& hstr(prev_lo));
+                    else
+                        print(l_file, "("& hstr(full_pc)& ") [LO]="& hstr(reg_lo));
+                    end if;
                 end if;
                 if prev_lo /= reg_lo and reg_lo(0)/='U'  then
                     print(l_file, "("& hstr(full_pc)& ") [LO]="& hstr(reg_lo));
