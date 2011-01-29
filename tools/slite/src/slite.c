@@ -244,6 +244,7 @@ int mem_read(State *s, int size, unsigned int address, int log);
 void mem_write(State *s, int size, int unsigned address, unsigned value);
 void start_load(State *s, int rt, int data);
 
+
 /*---- Local functions -------------------------------------------------------*/
 
 /** Log to file a memory read operation (not including target reg change) */
@@ -813,6 +814,7 @@ void show_state(State *s)
 {
    int i,j;
    printf("pid=%d userMode=%d, epc=0x%x\n", s->processId, s->userMode, s->epc);
+   printf("hi=0x%08x lo=0x%08x\n", s->hi, s->lo);
    for(i = 0; i < 4; ++i)
    {
       printf("%2.2d ", i * 8);
