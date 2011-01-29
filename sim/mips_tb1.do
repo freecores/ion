@@ -6,6 +6,7 @@ vlib work
 vcom -reportprogress 300 -work work ../vhdl/mips_pkg.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_shifter.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_alu.vhdl
+vcom -reportprogress 300 -work work ../vhdl/mips_mult.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_cpu.vhdl
 
 vcom -reportprogress 300 -work work ../vhdl/tb/txt_util.vhdl
