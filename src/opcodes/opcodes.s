@@ -9,11 +9,11 @@
 # Software 'as is' without warranty.  Author liable for nothing.
 #
 #-------------------------------------------------------------------------------
-#
 # This assembly file tests all of the opcodes supported by the Ion core. 
 # This test assumes that address 0x20000000 is the UART write register.
 # Successful tests will print out "A" or "AB" or "ABC" or ....
 # Missing letters or letters out of order indicate a failure.
+#
 #-------------------------------------------------------------------------------
 # NOTE: This test bench relies on the simulation logs to catch errors. That is,
 # unlike the original Plasma code, this one does not test the test success 
@@ -32,8 +32,8 @@
     .set TEST_UNALIGNED_STORES, 0       # unaligned stores
     .set TEST_BREAK, 1                  # BREAK instruction
     # WARNING: the assembler expands div instructions, see 'as' manual
-    .set TEST_DIV, 0                    # DIV* instructions
-    .set TEST_MUL, 0                    # MUL* instructions
+    .set TEST_DIV, 1                    # DIV* instructions
+    .set TEST_MUL, 1                    # MUL* instructions
 
     #---------------------------------------------------------------------------
 
@@ -733,12 +733,34 @@ break_continue:
     .endif
  
     #q: SYSCALL
-    ori     $2,$0,'q'
+    ori     $2,$0,'q'       # check if it jumpts to trap vector and comes back
     sb      $2,0($20)
     ori     $4,$0,61
     syscall 0
     addi    $4,$4,-1
     sb      $4,0($20)
+    
+    syscall 0               # check if load instruction is aborted (@log)
+    lb      $2,16($2)       
+    
+    syscall 0               # check if jump instruction is aborted (@log)
+    j       syscall_jump_test1
+    add     $4,$4,5
+    
+syscall_jump_test1:
+    add     $4,$4,1         # make sure the jump shows in the log (@log)
+
+    # TODO traps in delay slots not supported yet
+    #j       syscall_jump_test2 # check if syscall works in delay slot of jump
+    #break   0
+    nop
+    j       syscall_continue
+    nop
+
+syscall_jump_test2:
+    add     $4,$4,1
+    
+syscall_continue:
     sb      $23,0($20)
     sb      $21,0($20)
  
