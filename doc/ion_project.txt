@@ -3,7 +3,7 @@ The core structure is briefly explained in section 2. The rest of this doc is
 mostly usage instructions for the test samples and custom utilities.
 
 
-Last modified: Jan/27/2011
+Last modified: Jan/30/2011
 
 Send bug reports or comments to ja_rd[at]hotmail.com
 
@@ -30,7 +30,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     4.- Handle exceptions in a manner compatible to MIPS-I standard.
     5.- Implement as much of CP0 as necessary for the above goals.
     6.- Be no bigger than Plasma in a Spartan-3 or Cyclone-2 device, and
-        no slower.
+        no slower -- Plasma is used as a reference in many ways.
         Speed measured in raw clock frequency for the time being.
         (I.e. don't not consider stalls, interlocks, etc. yet)
     7.- Interlock behavior of MUL/DIV and L* compatible to toolchain.
@@ -63,7 +63,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     some basic MIPS-I code compiled with standard gcc tools (specifically, it
     can run a tiny 'hello world' program, see section 6).
     'Basic' means that the core has a number of limitations that prevent it from
-    running just any code -- no multiplication unit, for one thing.
+    running just any code.
     The opcode test is included in '/src/opcodes/opcodes.s' (see section 6).
 
 
@@ -102,6 +102,11 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
         3.- Trap instructions: due to the way exceptions are handled, neither
             'break' nor 'syscall' can be executed from a jump delay slot.
+        
+        4.- MUL*/DIV* instructions are implemented and pass the opcode test, but
+            the mul/div module should be optional (through generics).
+            Besides, mul/div instructions have never been tested in hardware.
+            
 
 
     ### Synthesis results (for SVN revision 1)
@@ -126,17 +131,19 @@ Send bug reports or comments to ja_rd[at]hotmail.com
         Using 2 Spartam-3 2K-byte BRAMs for the 1024-bit triple-port register
         bank looks like a waste but the choice is there.
 
-        Remember the above results are for a core with no mul/div module. This
-        module is hugely expensive (I budgeted 600 LUTs for it).
-
+        Remember the above results are for a core with no mul/div module.
+        
         Note the above is for revision 1. As I add functionality the area will
         grow. I will only update the numbers if there is a difference of more
         than 50 LUTs.
 
+        Revision 18 of the core already includes the multiplication module and
+        it size is about 470 Cyclone-2 LEs. I will update the above numbers
+        eventually...
+
 
 1.3.- Next steps
 
-    * Implement mul/div instructions.
     * Implement efficient load interlock detection with no wasted cycles.
     * Add a couple other code samples, including one with FP arithmetic.
 
@@ -146,13 +153,12 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 2.- CPU description
 ================================================================================
 
-    What follows is a short explaination of
-
 
 2.0.- Some general features
 
     * Synchronized to rising edge of clk only; no latches.
     * All inputs need to be synchronous to clk, all outputs are.
+    * Syncrhonous register bank, both read and write ports.
 
 
 2.1 Bus architecture
@@ -296,8 +302,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
 2.2 Pipeline
 
-    Here is where I would explain the structure of the cpu in detail; instead, 
-    I'm just going to do 
+    Here is where I would explain the structure of the cpu in detail; these 
+    brief comments will have to until I write some real documentation.
     
     This core has a 3-stage pipeline quite different from the original 
     architecture spec. Instead of trying to use the original names for the
@@ -312,7 +318,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
                       Memory read/data address is on data_rd/wr_address bus AND
                       Memory write data is on data_wr bus
         * LOAD      : Memory read data is on data_rd bus
-    
+        
     In the core source (mips_cpu.vhdl) the stages have been numbered:
     
         FETCH-1 = stage 0
@@ -369,13 +375,16 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     FETCH-0 would only include the logic between p0_pc_reg and the code ram 
     address port, so it has been omitted from the naming convention.
     
+    All read and write ports of the register bank are synchronous. The read 
+    ports belong logically to stage 1 and the write port to stage 2.
+    
     IMPORTANT: though the register bank read port is synchronous, its data can
     be used in stage 1 because it is read early (the port is loaded at the same 
     time as the instruction opcode). That is, a small part of the instruction 
     decoding is done on stage FETCH-1. Bearing in mind that the code ram is 
     meant to be the exact same type of block as the register bank, and we will 
     bundle the whole ALU delay plus the reg bank delay in stage 1, it does not
-    hurte moving part of the decoding to the previous cycle.
+    hurt moving part of the decoding to the previous cycle.
     
     All registers but a few exceptions belong squarely to one of the pipeline
     stages:
@@ -528,6 +537,25 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     
     Note that the epc register is not used by any instruction other than mfc0;
     ERET is not implemented yet, because privilege levels aren't either.
+
+
+2.6.- Multiplier
+
+    As of revision 18, the core already includes a multiplier module.
+    
+    It uses a slightly modified version of Plasma's multiplier unit. Changes
+    have been commented in the source code. 
+    
+    The main difference is the Plasma does  not stall the pipeline while a 
+    multiplication/division is going on. It only does when you attempt to get 
+    registers HI or LO while the multiplier is still running. Only then will
+    the pipeline stall until the operation completes.
+    This core instead stalls always for all the time it takes to do the 
+    operation. Not only it is simpler this way, it will also be easier to 
+    abort mult/div instructions.
+    
+    The logic dealing with mul/div stalls is a bit convoluted and coud use some
+    explaining and some ascii chronogram. Again, TBD.
 
 
 3.- Logic simulation
