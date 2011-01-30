@@ -590,10 +590,9 @@ p1_alu_op2_sel_set0 <=
     "00";
 
 -- ALU input-2 selection: use registers Hi and Lo for MFHI, MFLO
-with p1_ir_fn select p1_alu_op2_sel_set1 <=
-    "01" when "010000",
-    "10" when "010010",
-    "00" when others;
+p1_alu_op2_sel_set1 <= 
+    "01" when p1_op_special='1' and (p1_ir_fn="010000" or p1_ir_fn="010010")
+    else "00";
     
 -- ALU input-2 final selection
 p1_alu_op2_sel <= p1_alu_op2_sel_set0 or p1_alu_op2_sel_set1;
