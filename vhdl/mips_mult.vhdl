@@ -121,7 +121,11 @@ begin
       variable count : std_logic_vector(2 downto 0);
    begin
       count := "001";
-      if reset_in = '1' then
+      -- @ion Old asynchronous reset converted to synchronous, for consistency
+      -- (Code indenting mangled by the new 'if' level)
+      --if reset_in = '1' then
+      if rising_edge(clk) then
+      if reset_in = '1' then  
          mode_reg <= '0';
          negate_reg <= '0';
          sign_reg <= '0';
@@ -131,7 +135,8 @@ begin
          bb_reg <= ZERO;
          upper_reg <= ZERO;
          lower_reg <= ZERO;
-      elsif rising_edge(clk) then
+      --elsif rising_edge(clk) then
+      else
          case mult_func is
             when MULT_WRITE_LO =>
                lower_reg <= a;
@@ -227,7 +232,8 @@ begin
                end if; --count
 
          end case;
-         
+      
+      end if;   
       end if;
 
    end process;
@@ -248,9 +254,10 @@ end; --architecture logic
 -- @note3 : pause_out active until operation complete
 -- The original Plasma module allowed the pipeline and the multiplier to run
 -- concurrently until the multiplier result was needed, and only then the
--- pipeline was stalled.
+-- pipeline was stalled if the mul/div operation had not finished yet.
 -- We want to make sure we can abort a mul/div so for the time being we stall 
 -- until the operation is complete.
--- note that if we later want to change this, the parent module will need 
+-- I *think* that's what the libraries and the toolchain assume anyway.
+-- Note that if we later want to change this, the parent module will need 
 -- changes too (logic for p1_muldiv_running).
 --------------------------------------------------------------------------------
