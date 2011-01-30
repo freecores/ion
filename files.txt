@@ -4,7 +4,6 @@ Summary of the directories and files in this project.
 ./
 ================================================================================
 ./files.txt                 This file
-./readme.txt                Quick start
 
 
 
@@ -36,11 +35,14 @@ no_os.c                     Replacement for some common libc functions
 --------------------------------------------------------------------------------
 makefile                    Makefile
 opcodes.s                   Opcode test source file
+readme.txt                  Instructions
+
 
 ./src/hello                 Hello World sample
 --------------------------------------------------------------------------------
 makefile                    Makefile
 hello.c                     Prints a welcome message on a terminal
+readme.txt                  Instructions
 
 
 
@@ -50,6 +52,7 @@ mips_pkg.vhdl               Package with declarations common to all modules
 mips_cpu.vhdl               Main CPU core module (excludes caches)
 mips_shifter.vhdl           Barrel shifter module
 mips_alu.vhdl               ALU module
+mips_mult.vhdl              Multiplier/divider mudule (from Plasma)
 
 ./vhdl/tb                   VHDL source for simulation test bench
 --------------------------------------------------------------------------------
