@@ -2,6 +2,8 @@
 # Get common makefile stuff (toolchain & system config)
 include ../common/makefile
 	
+# We'll run the simulation for 2000 clock cycles
+SIM_LENGTH = 2000
 	
 clean:
 	-$(RM) *.o *.obj *.map *.lst *.hex *.exe *.axf *.code *.data
@@ -26,9 +28,11 @@ hello.data: hello
 # Create VHDL file for simulation test bench
 hello_sim: hello.code hello.data
 	$(TO_VHDL) $(VHDL_FLAGS) --code hello.code --data hello.data \
-	-v $(SRC_DIR)/mips_tb1_template.vhdl -o $(TB_DIR)/mips_tb1.vhdl -e mips_tb1
+		-s $(SIM_LENGTH) -v $(SRC_DIR)/mips_tb1_template.vhdl \
+		-o $(TB_DIR)/mips_tb1.vhdl -e mips_tb1
 
 # Create VHDL file for hardware demo
 hello_demo: hello.code hello.data
 	$(TO_VHDL) $(VHDL_FLAGS) --code hello.code --data hello.data \
-	-v $(SRC_DIR)/mips_mpu_template.vhdl -o $(DEMO_DIR)/mips_mpu.vhdl -e mips_mpu
+		-v $(SRC_DIR)/mips_mpu_template.vhdl 
+		-o $(DEMO_DIR)/mips_mpu.vhdl -e mips_mpu

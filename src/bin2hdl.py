@@ -21,6 +21,7 @@ def usage():
     print "data_size <number>         Size of data memory in words (decimal)"
     print ""
     print "Additionally, any of these arguments can be given:"
+    print "{s|sim_len} <number>       Length of simulation in clock cycles"
     print "{d|data} <filename>        Data binary image file name"
     print "{h|help}                   Display some help text and exit"
     print "{i|indent} <number>        Indentation in VHDL tables (decimal)"
@@ -35,6 +36,7 @@ def help():
     print "Other template tags are replaced as follows:"
     print "@entity_name@         : Name of entity in target vhdl file"
     print "@arch_name@           : Name of architecture in target vhdl file"
+    print "@sim_len@             : Length of simulation in clock cycles"
     print "@code_table_size@     : Size of code RAM block, in words"
     print "@code_addr_size@      : ceil(Log2(@code_table_size@))"
     print "@data_table_size@     : Size of data RAM block, in words"
@@ -91,13 +93,15 @@ def main(argv):
     code_table_size = -1        # size of VHDL table
     data_table_size = -1        # size of VHDL table
     bin_words = 0               # size of binary file in 32-bit words 
+    simulation_length = 22000   # length of logic simulation in clock cycles
     
     #
 
     try:                                
-        opts, args = getopt.getopt(argv, "hc:d:v:a:e:o:i:", 
+        opts, args = getopt.getopt(argv, "hc:d:v:a:e:o:i:s:", 
         ["help", "code=", "data=", "vhdl=", "architecture=", 
-         "entity=", "output=", "indent=", "code_size=", "data_size="])
+         "entity=", "output=", "indent=", "sim_len=",
+         "code_size=", "data_size="])
     except getopt.GetoptError:
         usage()
         sys.exit(2)  
@@ -122,6 +126,8 @@ def main(argv):
             entity_name = arg
         elif opt in ("-i", "--indent"):
             indent = int(arg)
+        elif opt in ("-s", "--sim_len"):
+            simulation_length = int(arg)
         elif opt == "--code_size":
             code_table_size = int(arg)
         elif opt == "--data_size":
@@ -188,10 +194,12 @@ def main(argv):
     keywords = ["@code0@","@code1@","@code2@","@code3@",
                 "@data0@","@data1@","@data2@","@data3@",
                 "@entity_name@","@arch_name@",
+                "@sim_len@",
                 "@code_table_size@","@code_addr_size@",
                 "@data_table_size@","@data_addr_size@"];
     replacement = vhdl_code_strings + vhdl_data_strings + \
                  [entity_name, arch_name, 
+                  str(simulation_length),
                   str(code_table_size), 
                   str(int(math.floor(math.log(code_table_size,2)))),
                   str(data_table_size), 
