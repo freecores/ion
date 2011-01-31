@@ -26,14 +26,6 @@
 *-------------------------------------------------------------------------------
 * KNOWN BUGS:
 *
-* 1.- Load delay slot simulation does not work
-*
-* Some programs don't work when load delay slots are simulated (by setting
-* "s->load_delay_slot = 1" in function main).
-*
-* The actual HW core does no longer use load delay slots but load interlocking
-* so it may be better to just remove this feature.
-*
 *-------------------------------------------------------------------------------
 * @date 2011-jan-16
 *
@@ -171,13 +163,10 @@ typedef struct
 } MmuEntry;
 
 typedef struct {
-   int load_delay_slot;
-   int delay;
-   unsigned delayed_reg;
-   int delayed_data;
-
    unsigned failed_assertions;            /**< assertion bitmap */
    unsigned faulty_address;               /**< addr that failed assertion */
+
+   int delay_slot;              /**< !=0 if prev. instruction was a branch */
 
    int r[32];
    int opcode;
@@ -185,6 +174,7 @@ typedef struct {
    unsigned int hi;
    unsigned int lo;
    int status;
+   unsigned cp0_cause;
    int userMode;
    int processId;
    int exceptionId;        /**< DEPRECATED, to be removed */
@@ -531,23 +521,17 @@ void mult_big_signed(int a,
 
 /** Load data from memory (used to simulate load delay slots) */
 void start_load(State *s, int rt, int data){
-   if(s->load_delay_slot){
-      s->delayed_reg = rt;
-      s->delay = 1;
-      s->delayed_data = data;
-   }
-   else{
-      /* load delay slot not simulated */
-      s->r[rt] = data;
-   }
+   /* load delay slot not simulated */
+   s->r[rt] = data;
 }
 
 /** Execute one cycle of the CPU (including any interlock stall cycles) */
 void cycle(State *s, int show_mode)
 {
    unsigned int opcode;
+   int delay_slot = 0; /* 1 of this instruction is a branch */
    unsigned int op, rs, rt, rd, re, func, imm, target;
-   int imm_sex;
+   int trap_cause = 0;
    int imm_shift, branch=0, lbranch=2, skip2=0;
    int *r=s->r;
    unsigned int *u=(unsigned int*)s->r;
@@ -565,7 +549,6 @@ void cycle(State *s, int show_mode)
    re = (opcode >> 6) & 0x1f;
    func = opcode & 0x3f;
    imm = opcode & 0xffff;
-   imm_sex = (imm&0x8000)? 0xffff0000 | imm : imm;
    imm_shift = (((int)(short)imm) << 2) - 4;
    target = (opcode << 6) >> 4;
    ptr = (short)imm + r[rs];
@@ -589,10 +572,6 @@ void cycle(State *s, int show_mode)
       return;
    /* epc will point to the victim instruction, i.e. THIS instruction */
    epc = s->pc;
-   if(s->pc_next != s->pc + 4){
-      /* FIXME traps in delay slots not supported yet */
-      //epc = epc - 4;  /* trap in branch delay slot */
-   }
 
    s->pc = s->pc_next;
    s->pc_next = s->pc_next + 4;
@@ -613,13 +592,16 @@ void cycle(State *s, int show_mode)
             case 0x04:/*SLLV*/ r[rd]=r[rt]<<r[rs];       break;
             case 0x06:/*SRLV*/ r[rd]=u[rt]>>r[rs];       break;
             case 0x07:/*SRAV*/ r[rd]=r[rt]>>r[rs];       break;
-            case 0x08:/*JR*/   s->pc_next=r[rs];         break;
-            case 0x09:/*JALR*/ r[rd]=s->pc_next; s->pc_next=r[rs]; break;
+            case 0x08:/*JR*/   delay_slot=1;
+                               s->pc_next=r[rs];         break;
+            case 0x09:/*JALR*/ delay_slot=1;
+                               r[rd]=s->pc_next;
+                               s->pc_next=r[rs]; break;
             case 0x0a:/*MOVZ*/ if(!r[rt]) r[rd]=r[rs];   break;  /*IV*/
             case 0x0b:/*MOVN*/ if(r[rt]) r[rd]=r[rs];    break;  /*IV*/
-            case 0x0c:/*SYSCALL*/ /* epc|=1; WHY? */
+            case 0x0c:/*SYSCALL*/ trap_cause = 8;
                                   s->exceptionId=1; break;
-            case 0x0d:/*BREAK*/   /* epc|=1; WHY? */
+            case 0x0d:/*BREAK*/   trap_cause = 9;
                                   s->exceptionId=1; break;
             case 0x0f:/*SYNC*/ s->wakeup=1;              break;
             case 0x10:/*MFHI*/ r[rd]=s->hi;              break;
@@ -664,7 +646,8 @@ void cycle(State *s, int show_mode)
           }
          break;
       case 0x03:/*JAL*/    r[31]=s->pc_next;
-      case 0x02:/*J*/      s->pc_next=(s->pc&0xf0000000)|target; break;
+      case 0x02:/*J*/      delay_slot=1;
+                           s->pc_next=(s->pc&0xf0000000)|target; break;
       case 0x04:/*BEQ*/    branch=r[rs]==r[rt];     break;
       case 0x05:/*BNE*/    branch=r[rs]!=r[rt];     break;
       case 0x06:/*BLEZ*/   branch=r[rs]<=0;         break;
@@ -680,10 +663,15 @@ void cycle(State *s, int show_mode)
       case 0x10:/*COP0*/
          if((opcode & (1<<23)) == 0)  //move from CP0
          {
-            if(rd == 12)
+            if(rd == 12){
                r[rt]=s->status;
-            else
+            }
+            else if(rd == 13){
+               r[rt]=s->cp0_cause;
+            }
+            else{
                r[rt]=s->epc;
+            }
          }
          else                         //move to CP0
          {
@@ -771,42 +759,30 @@ void cycle(State *s, int show_mode)
       s->failed_assertions=0;
    }
 
-
    /* if there's a delayed load pending, do it now: load reg with memory data */
-   if(s->load_delay_slot){
-      /*--- simulate real core's load interlock ---*/
-      if(s->delay<=0){
-         if(s->delayed_reg>0){
-            s->r[s->delayed_reg] = s->delayed_data;
-         }
-         s->delayed_reg = 0;
-      }
-      else{
-         s->delay = s->delay - 1;
-      }
-   }
-   else{
-      /*--- delay slot or interlocking not simulated ---*/
-      /*
-      if(s->delay){
-         r[s->delayed_reg] = s->delayed_data;
-         s->delay=0;
-      }
-      */
-   }
+   /* load delay slots not simulated */
 
    /* Handle exceptions */
    if(s->exceptionId)
    {
       r[rt] = rSave;
+      s->cp0_cause = (s->delay_slot & 0x1) << 31 | (trap_cause & 0x1f);
+      /* adjust epc if we (i.e. the victim instruction) are in a delay slot */
+      if(s->delay_slot){
+        epc = epc - 4;
+      }
       s->epc = epc;
       s->pc_next = 0x3c;
       s->skip = 1;
       s->exceptionId = 0;
       s->userMode = 0;
       //s->wakeup = 1;
-      return;
    }
+
+   /* if this instruction was any kind of branch that actually jumped, then
+      the next instruction will be in a delay slot. Remember it. */
+   delay_slot = ((lbranch==1) || branch || delay_slot);
+   s->delay_slot = delay_slot;
 }
 
 /** Dump CPU state to console */
@@ -842,7 +818,6 @@ void do_debug(State *s)
    int i, j=0, watch=0, addr;
    s->pc_next = s->pc + 4;
    s->skip = 0;
-   s->delayed_reg = 0;
    s->wakeup = 0;
    show_state(s);
    ch = ' ';
@@ -986,7 +961,6 @@ int main(int argc,char *argv[])
    printf("MIPS-I emulator\n");
    memset(s, 0, sizeof(State));
    s->big_endian = 1;
-   s->load_delay_slot = 0;
    s->mem = (unsigned char*)malloc(MEM_SIZE);
    memset(s->mem, 0, MEM_SIZE);
 
@@ -1018,6 +992,7 @@ int main(int argc,char *argv[])
    /* Simulate a CPU reset */
    /* FIXME cpu reset function needed */
    s->pc = 0x0;      /* reset start vector */
+   s->delay_slot = 0;
    s->failed_assertions = 0; /* no failed assertions pending */
 
    /* FIXME PC fixup at address zero has to be removed */
