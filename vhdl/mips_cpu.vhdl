@@ -9,24 +9,17 @@
 -- Software placed into the public domain by the author. Use under the terms of
 -- the GPL.
 -- Software 'as is' without warranty.  Author liable for nothing.
---------------------------------------------------------------------------------
--- NOTE: exceptions only partially implemented; jumps, loads and stores are
--- not aborted.
--- 
 --
 --------------------------------------------------------------------------------
---### PLASMA features not implemented yet
---  # MUL/DIV
---
 --### MIPS-I things not implemented
---  # Invalid instruction detection
+--  # Invalid instruction trapping:
+--      * invalid opcodes do trap but side affects not prevented yet
 --  # Kernel/user status
 --  # RTE instruction
 --  # Most of the CP0 registers and of course all of the CP1
 --  # External interrupts
 --
 --### Things implemented but not tested
---  # Syscall instruction (does a jal to 0x3c and that's it)
 --  # Memory pause input
 --
 --### Things with provisional implementation
@@ -36,10 +29,8 @@
 --     every load takes two cycles.
 --     The interlock logic should check register indices.
 --
--- 2.- Invalid instructions are not detected as such. Their behaviour is
---     undefined and inpredictable.
---     Invalid instructions should trigger an exception or at least just NOP.
---     This is closely related to privilege level so it will have to wait.
+-- 2.- Invalid instructions trigger trap cause 10 but their side affects are NOT
+--     prevented.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -68,7 +59,7 @@ entity mips_cpu is
         data_wr_addr    : out std_logic_vector(31 downto 2);
         byte_we         : out std_logic_vector(3 downto 0);
         data_wr         : out std_logic_vector(31 downto 0);
-        
+      
         mem_wait        : in std_logic
     );
 end; --entity mips_cpu
@@ -90,6 +81,11 @@ signal p0_rt_num :          t_regnum;
 signal p0_jump_cond_value : std_logic;
 signal p0_rbank_rs_hazard : std_logic;
 signal p0_rbank_rt_hazard : std_logic;
+signal p0_uses_rs1 :        std_logic;
+signal p0_uses_rs2 :        std_logic;
+
+signal p1_rs1_hazard :      std_logic;
+signal p1_rs2_hazard :      std_logic;
 
 --------------------------------------------------------------------------------
 -- Pipeline stage 1
@@ -109,6 +105,7 @@ signal p1_rs_rbank :        t_word;
 signal p1_rt_rbank :        t_word;
 signal p1_rbank_forward :   t_word;
 signal p1_rd_num :          t_regnum;
+signal p1_c0_rs_num :       t_regnum;
 signal p1_rbank_wr_addr :   t_regnum;
 signal p1_rbank_we :        std_logic;
 signal p1_rbank_wr_data :   t_word;
@@ -136,8 +133,6 @@ signal p1_do_reg_jump :     std_logic;
 signal p1_do_zero_ext_imm : std_logic;
 signal p1_set_cp0 :         std_logic;
 signal p1_get_cp0 :         std_logic;
-signal p1_load_hi :         std_logic;
-signal p1_load_lo :         std_logic;
 signal p1_alu_op2_sel :     std_logic_vector(1 downto 0);
 signal p1_alu_op2_sel_set0: std_logic_vector(1 downto 0);
 signal p1_alu_op2_sel_set1: std_logic_vector(1 downto 0);
@@ -195,12 +190,17 @@ signal pipeline_interlocked:std_logic;
 -- CP0 registers and signals
 
 -- CP0[12]: status register 
--- FIXME status flags unimplemented
 signal cp0_status :         std_logic_vector(1 downto 0);
 -- Output of CP0 register bank (only a few regs are implemented)
 signal cp0_reg_read :       t_word;
 -- CP0[14]: EPC register (PC value saved at exceptions)
 signal cp0_epc :            t_pc;
+-- CP0[13]: 'Cause' register (cause and attributes of exception)
+signal cp0_cause :          t_word;
+signal cp0_in_delay_slot :  std_logic;
+signal cp0_cause_bd :       std_logic;
+signal cp0_cause_ce :       std_logic_vector(1 downto 0);
+signal cp0_cause_exc_code : std_logic_vector(4 downto 0);
 
 begin
 
@@ -429,10 +429,16 @@ begin
             -- p0_pc_reg holds the same value as external sync ram addr register
             p0_pc_reg <= p0_pc_next;
             -- p0_pc_restart = addr saved to EPC on interrupts (@note2)
-            -- It's the addr of the instruction triggering the exception
-            -- FIXME handle delay slot case
+            -- It's the addr of the instruction triggering the exception,
+            -- except when the triggering instruction is in a delay slot. In 
+            -- that case, this is the previous jump instruction address.
+            -- I.e. all as per the mips-1 specs.
             if (p1_jump_type="00" or p0_jump_cond_value='0') then 
                 p0_pc_restart <= p0_pc_reg;
+                -- remember if we are in a delay slot, in case there's a trap
+                cp0_in_delay_slot <= '0'; -- NOT in a delay slot
+            else
+                cp0_in_delay_slot <= '1'; -- in a delay slot
             end if;
         end if;
     end if;
@@ -444,7 +450,7 @@ data_rd_addr <= p1_data_addr(31 downto 0);
 
 -- FIXME these two need to pushed behind a register, they are glitch-prone
 data_rd_vma <= p1_do_load and not pipeline_stalled; -- FIXME register
-code_rd_vma <= not stall_pipeline; -- FIXME registe
+code_rd_vma <= not stall_pipeline; -- FIXME register
 
 code_rd_addr <= p0_pc_next;
 
@@ -570,17 +576,17 @@ p1_load_alu_set0 <= '1'
     else '0';
     
 with p1_ir_op select p1_load_alu_set1 <= 
-    '1' when "001000",
-    '1' when "001001",
-    '1' when "001010",
-    '1' when "001011",
-    '1' when "001100",
-    '1' when "001101",
-    '1' when "001110",
-    '1' when "001111",
-    -- FIXME a few others missing: MFC0, etc
+    '1' when "001000",  -- addi
+    '1' when "001001",  -- addiu
+    '1' when "001010",  -- slti
+    '1' when "001011",  -- sltiu
+    '1' when "001100",  -- andi
+    '1' when "001101",  -- ori
+    '1' when "001110",  -- xori
+    '1' when "001111",  -- lui
     '0' when others;
-p1_load_alu <= p1_load_alu_set0 or p1_load_alu_set1;
+p1_load_alu <= (p1_load_alu_set0 or p1_load_alu_set1) and
+                not p1_unknown_opcode;
 
 p1_ld_upper_hword <= p1_ir_op(27); -- use input upper hword vs. sign extend/zero
 p1_ld_upper_byte <= p1_ir_op(26);  -- use input upper byte vs. sign extend/zero
@@ -600,13 +606,15 @@ p1_alu_op2_sel_set1 <=
 p1_alu_op2_sel <= p1_alu_op2_sel_set0 or p1_alu_op2_sel_set1;
 
 -- Decode store operations
-p1_do_store <= '1' when p1_ir_op(31 downto 29)="101" else '0';
+p1_do_store <= 
+    '1' when p1_ir_op(31 downto 29)="101" and
+    p2_exception='0'    -- abort when previous instruction triggered exception
+    else '0';
 p1_store_size <= p1_ir_op(27 downto 26);
 
 
--- Decode load enables for Hi and Lo registers (MTHI and MTLO)
-p1_load_hi <= '1' when p1_op_special='1' and p1_ir_fn="010001" else '0';
-p1_load_lo <= '1' when p1_op_special='1' and p1_ir_fn="010011" else '0';
+-- Extract source and destination C0 register indices
+p1_c0_rs_num <= p1_ir_reg(15 downto 11);
 
 -- Decode ALU control dignals
 
@@ -822,7 +830,37 @@ stall_pipeline <= mem_wait or load_interlock or p1_muldiv_stall;
 -- FIXME load interlock should happen only if the instruction following 
 -- the load actually uses the load target register. Something like this:
 -- (p1_do_load='1' and (p1_rd_num=p0_rs_num or p1_rd_num=p0_rt_num))
-load_interlock <= '1' when (p1_do_load='1' and pipeline_stalled='0') else '0';
+load_interlock <= '1' when 
+    p1_do_load='1' and      -- this is a load instruction
+    pipeline_stalled='0' and -- not already stalled (i.e. assert for 1 cycle)
+    (p1_rs1_hazard='1' or p1_rs2_hazard='1')
+    
+    else '0';
+
+p1_rs1_hazard <= '1'; --'1' when p0_uses_rs1='1' and p1_rd_num=p0_rs_num else '0';
+p1_rs2_hazard <= '1'; --'1' when p0_uses_rs2='1' and p1_rd_num=p0_rt_num else '0';
+
+with p1_ir_op select p0_uses_rs1 <= 
+    '0' when "000010",
+    '0' when "000011",
+    '0' when "001111",
+    '0' when "001000",
+    '1' when others;
+    
+with p1_ir_op select p0_uses_rs2 <= 
+    '1' when "000000",
+    '1' when "000100",
+    '1' when "000101",
+    '1' when "000110",
+    '1' when "000111",
+    '1' when "010000",
+    '1' when "101000",
+    '1' when "101001",
+    '1' when "101010",
+    '1' when "101011",
+    '1' when "101110",
+    '0' when others;
+    
 
 --------------------------------------------------------------------------------
 
@@ -876,6 +914,8 @@ begin
         if reset='1' then
             -- "10" => mode=kernel; ints=disabled
             cp0_status <= "10";
+            cp0_cause_exc_code <= "00000";
+            cp0_cause_bd <= '0';
         else
             -- no need to check for stall cycles when loading these
             if p1_set_cp0='1' then
@@ -884,14 +924,34 @@ begin
             end if;
             if p1_exception='1' then
                 cp0_epc <= p0_pc_restart;
+                
+                if p1_unknown_opcode='1' then
+                    cp0_cause_exc_code <= "01010"; -- bad opcode
+                else
+                    if p1_ir_fn(0)='0' then
+                        cp0_cause_exc_code <= "01000"; -- syscall
+                    else
+                        cp0_cause_exc_code <= "01001"; -- break
+                    end if;
+                end if;
+                
+                cp0_cause_bd <= cp0_in_delay_slot;
             end if;
         end if;
     end if;
 end process;
 
+cp0_cause_ce <= "00"; -- FIXME CP* traps merged with unimplemented opcode traps
+cp0_cause <= cp0_cause_bd & '0' & cp0_cause_ce & 
+             X"00000" & "000" & 
+             cp0_cause_exc_code;
+
 -- FIXME the mux should mask to zero for any unused reg index
-cp0_reg_read <= X"0000000" & "00" & cp0_status when p1_rd_num="01100" else
-                cp0_epc & "00";
+with p1_c0_rs_num select cp0_reg_read <=
+    X"0000000" & "00" & cp0_status  when "01100",
+    cp0_cause                       when "01101",
+    cp0_epc & "00"                  when others;
+
 
 end architecture rtl;
 
