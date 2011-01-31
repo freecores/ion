@@ -1041,6 +1041,8 @@ MoveTest:
     sb      $23,0($20)
     sb      $21,0($20)
  
+    # HI and LO are only implemented if the mul/div block is
+    .ifgt (TEST_DIV + TEST_MUL)
     #a: MFHI
     ori     $2,$0,'a'
     sb      $2,0($20)
@@ -1080,7 +1082,7 @@ MoveTest:
     sb      $3,0($20)
     sb      $23,0($20)
     sb      $21,0($20)
- 
+    .endif
  
     ######################################
     #Shift Instructions
