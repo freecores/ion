@@ -45,8 +45,8 @@ constant T : time           := 20 ns;
 -- WARNING: slite does not simulate this. The logs may be different when > 0.0!
 constant SIMULATED_UART_TX_TIME : time := 0.0 us;
                
--- Simulation length in clock cycles -- 2000 is enough for 'hello' sample
-constant SIMULATION_LENGTH : integer := 2000;
+-- 2000 is enough for 'hello' sample, 22000 enough for 10 digits of pi
+constant SIMULATION_LENGTH : integer := @sim_len@;
 
 --------------------------------------------------------------------------------
 -- UUT & interface signals
@@ -92,6 +92,18 @@ signal ld_upper_hword :     std_logic;
 
 -- Log file
 file l_file: TEXT open write_mode is "hw_sim_log.txt";
+
+-- Console output log file
+file con_file: TEXT open write_mode is "hw_sim_console_log.txt";
+
+-- Maximum line size of for console output log. Lines longer than this will be
+-- truncated.
+constant CONSOLE_LOG_LINE_SIZE : integer := 1024*4;
+
+-- Console log line buffer
+signal con_line_buf :       string(1 to CONSOLE_LOG_LINE_SIZE);
+signal con_line_ix :        integer := 1;
+
 
 
 --------------------------------------------------------------------------------
@@ -165,13 +177,21 @@ begin
 
     drive_uut:
     process
+    variable l : line;
     begin
         wait for T*4;
         reset <= '0';
         
         wait for T*SIMULATION_LENGTH;
         
-        print("TB0 finished");
+        -- Flush console output to log console file (in case the end of the
+        -- simulation caugh an unterminated line in the buffer)
+        if con_line_ix > 1 then
+            write(l, con_line_buf(1 to con_line_ix));
+            writeline(con_file, l);
+        end if;
+        
+        print("TB1 finished");
         done <= '1';
         wait;
         
@@ -242,20 +262,20 @@ begin
                     
                     -- UART TX data goes to output after a bit of line-buffering
                     -- and editing
-                    if uart_data = 13 then
+                    if uart_data = 10 then
                         -- CR received: print output string and clear it
-                        print(s);
-                        si := 1;
-                        for i in 1 to s'high loop
-                            s(i) := ' ';
+                        print(con_file, con_line_buf(1 to con_line_ix));
+                        con_line_ix <= 1;
+                        for i in 1 to con_line_buf'high loop
+                           con_line_buf(i) <= ' ';
                         end loop;
-                    elsif uart_data = 10 then
+                    elsif uart_data = 13 then
                         -- ignore LF
                     else
                         -- append char to output string
-                        if si < s'high then
-                            s(si) := character'val(uart_data);
-                            si := si + 1;
+                        if con_line_ix < con_line_buf'high then
+                            con_line_buf(con_line_ix) <= character'val(uart_data);
+                            con_line_ix <= con_line_ix + 1;
                         end if;
                     end if;
                 else
