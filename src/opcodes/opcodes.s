@@ -51,24 +51,61 @@ entry:
     nop
 
     b       StartTest
-    nop                         #nops required to place ISR at 0x3c
     nop
 
-OS_AsmPatchValue:
-    #Code to place at address 0x3c
-    lui     $26, 0x1000
-    ori     $26, $26, 0x3c
-    jr      $26
-    nop
 
+    # Trap handler address 
     .org    0x3c
-    # FIXME assume exception is trap or break for the time being
-InterruptVector:                # Address=0x3c
-    mfc0    $26,$14             # C0_EPC=14 (Exception PC)
-    addi    $26,$26,4           # skip trap instruction
-    jr      $26
+    # We have three trap sources: syscall, break and unimplemented opcode
+    # Plus we have to account for a faulty cause code; that's 4 causes
+    # Besides, we have to look out for the branch delay flag (BD)
+    # We'll just increment $4 by a fixed constant depending on the cause
+    # so we will not save any registers (there's no stack anyway)
+InterruptVector:
+    mfc0    $k0,$13             # Get trap cause code
+    andi    $k0,$k0,0x01f
+    ori     $k1,$zero,0x8       # was it a syscall?
+    beq     $k0,$k1,trap_syscall
+    addi    $k1,$k1,0x1         # was it a break?
+    beq     $k0,$k1,trap_break
+    addi    $k1,$k1,0x1         # was it a bad opcode?
+    bne     $k0,$k1,trap_invalid
+    nop
+    
+    # Unimplemented instruction
+trap_unimplemented:
+    j       trap_return
+    add     $4,$4,4
+
+    # Break instruction
+trap_break:
+    j       trap_return
     add     $4,$4,5
-   
+    
+    # Syscall instruction
+trap_syscall:
+    j       trap_return
+    add     $4,$4,6
+
+    # Invalid trap cause code, most likely hardware bug
+trap_invalid:
+    j       trap_return
+    add     $4,$4,0xf
+
+trap_return:
+    mfc0    $k1,$14             # C0_EPC=14 (Exception PC)
+    mfc0    $k0,$13             # Get bit 31 (BD) from C0 cause register
+    srl     $k0,31
+    andi    $k0,$k0,1
+    bnez    $k0,trap_return_delay_slot
+    addi    $k1,$k1,4           # skip trap instruction
+    jr      $k1
+    nop
+trap_return_delay_slot:
+    addi    $k1,$k1,4           # skip jump instruction too
+    jr      $k1                 # (we just added 8 to epc)
+
+
 StartTest:
     mtc0    $0,$12              # disable interrupts
     lui     $20,0x2000          # serial port write address
@@ -85,22 +122,7 @@ StartTest:
     sb      $21,0($20)
     sb      $23,0($20)
     sb      $21,0($20)
- 
-    #Patch interrupt vector to 0x1000003c
-    la      $5, OS_AsmPatchValue
-    sub     $6,$5,0x1000
-    blez    $6,NoPatch
-    nop
-    #lw     $6, 0($5)
-    #sw     $6, 0x3c($0)
-    #lw     $6, 4($5)
-    #sw     $6, 0x40($0)
-    #lw     $6, 8($5)
-    #sw     $6, 0x44($0)
-    #lw     $6, 12($5)
-    #sw     $6, 0x48($0)
-NoPatch:
- 
+  
     ######################################
     #Arithmetic Instructions
     ######################################
@@ -717,9 +739,11 @@ BreakTest:
 break_jump_test1:
     add     $4,$4,1         # make sure the jump shows in the log (@log)
 
-    # TODO traps in delay slots not supported yet
-    #j       break_jump_test2# check if break works in delay slot of jump
-    #break   0
+    break   0               # check if store instruction is aborted
+    sb      $4,0($20)
+
+    j       break_jump_test2# check if break works in delay slot of jump
+    break   0
     nop
     j       break_continue
     nop
