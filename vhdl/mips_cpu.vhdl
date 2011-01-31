@@ -68,8 +68,7 @@ entity mips_cpu is
         data_wr_addr    : out std_logic_vector(31 downto 2);
         byte_we         : out std_logic_vector(3 downto 0);
         data_wr         : out std_logic_vector(31 downto 0);
-
-        -- NOTE: needs to be synchronous to clk
+        
         mem_wait        : in std_logic
     );
 end; --entity mips_cpu
@@ -164,6 +163,7 @@ signal p1_muldiv_running :  std_logic;
 signal p1_muldiv_started :  std_logic;
 signal p1_muldiv_stall :    std_logic;
 
+signal p1_unknown_opcode :  std_logic;
 
 --------------------------------------------------------------------------------
 -- Pipeline stage 2
@@ -327,8 +327,8 @@ p1_alu_inp1 <= p1_rs;
 
 with p1_alu_op2_sel select p1_alu_inp2 <= 
     p1_data_imm         when "11",
-    p1_muldiv_result    when "01", -- FIXME mux input wasted!
-    p1_muldiv_result    when "10",
+    p1_muldiv_result    when "01",
+    --p1_muldiv_result    when "10", -- FIXME mux input wasted!
     p1_rt               when others;
 
 alu_inst : entity work.mips_alu
@@ -533,8 +533,10 @@ with p1_jump_cond_sel select p0_jump_cond_value <=
     '1'                                 when others;
 
 -- Decode instructions that launch exceptions
-p1_exception <= '1' when p1_op_special='1' and p1_ir_reg(5 downto 1)="00110" 
-                else '0';
+p1_exception <= '1' when 
+    (p1_op_special='1' and p1_ir_reg(5 downto 1)="00110") or
+    p1_unknown_opcode='1'
+    else '0';
 
 -- Decode MTC0/MFC0 instructions
 p1_set_cp0 <= '1' when p1_ir_reg(31 downto 21)="01000000100" else '0';
@@ -650,6 +652,55 @@ p1_ac.logic_sel <= "00" when (p1_op_special='1' and p1_ir_fn="100100") else
                  "11";
 
 p1_ac.shift_amount <= p1_ir_reg(10 downto 6) when p1_ir_fn(2)='0' else p1_rs(4 downto 0);
+
+
+--------------------------------------------------------------------------------
+-- Decoding of unimplemented and privileged instructions
+
+-- Unimplemented instructions include:
+--  1.- All instructions above architecture MIPS-I except:
+--      1.1.- eret
+--  2.- Unaligned stores and loads (LWL,LWR,SWL,SWR)
+--  3.- All CP0 instructions other than mfc0 and mtc0
+--  4.- All CPi instructions
+--  5.- All cache instructions
+-- For the time being, we'll decode them all together.
+
+-- FIXME: some of these should trap but others should just NOP (e.g. EHB)
+
+p1_unknown_opcode <= '1' when
+    -- decode by 'opcode' field
+    p1_ir_op(31 downto 29)="011" or
+    p1_ir_op(31 downto 29)="110" or
+    p1_ir_op(31 downto 29)="111" or
+    (p1_ir_op(31 downto 29)="010" and p1_ir_op(28 downto 26)/="000") or
+    p1_ir_op="101111" or    -- CACHE
+    p1_ir_op="100010" or    -- LWL
+    p1_ir_op="100110" or    -- LWR
+    p1_ir_op="101010" or    -- SWL
+    p1_ir_op="101110" or    -- SWR
+    p1_ir_op="100111" or
+    p1_ir_op="101100" or
+    p1_ir_op="101101" or
+    -- decode instructions in the 'special' opcode group
+    (p1_ir_op="000000" and 
+                (p1_ir_fn(5 downto 4)="11" or
+                 p1_ir_fn="000001" or
+                 p1_ir_fn="000101" or
+                 p1_ir_fn="001010" or
+                 p1_ir_fn="001011" or
+                 p1_ir_fn="001110" or
+                 p1_ir_fn(5 downto 2)="0101" or
+                 p1_ir_fn(5 downto 2)="0111" or
+                 p1_ir_fn(5 downto 2)="1011")) or
+    -- decode instructions in the 'regimm' opcode group
+    (p1_ir_op="000001" and 
+                (p1_ir_reg(20 downto 16)/="00000" and -- BLTZ is valid
+                 p1_ir_reg(20 downto 16)/="00001" and -- BGEZ is valid
+                 p1_ir_reg(20 downto 16)/="10000" and -- BLTZAL is valid 
+                 p1_ir_reg(20 downto 16)/="10001")) -- BGEZAL is valid
+
+    else '0';
 
 --------------------------------------------------------------------------------
 
