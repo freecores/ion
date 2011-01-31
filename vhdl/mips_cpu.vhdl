@@ -4,7 +4,7 @@
 -- project:       ION (http://www.opencores.org/project,ion_cpu)
 -- author:        Jose A. Ruiz (ja_rd@hotmail.com)
 -- created:       Jan/11/2011
--- last modified: Jan/25/2011 (ja_rd@hotmail.com)
+-- last modified: Jan/31/2011 (ja_rd@hotmail.com)
 --------------------------------------------------------------------------------
 -- Software placed into the public domain by the author. Use under the terms of
 -- the GPL.
@@ -13,9 +13,10 @@
 --------------------------------------------------------------------------------
 --### MIPS-I things not implemented
 --  # Invalid instruction trapping:
---      * invalid opcodes do trap but side affects not prevented yet
+--      * invalid opcodes do trap but the logic that prevents bad opcodes from
+--        having side affects has not been tested yet.
 --  # Kernel/user status
---  # RTE instruction
+--  # RTE instruction (or ERET)
 --  # Most of the CP0 registers and of course all of the CP1
 --  # External interrupts
 --
@@ -29,8 +30,6 @@
 --     every load takes two cycles.
 --     The interlock logic should check register indices.
 --
--- 2.- Invalid instructions trigger trap cause 10 but their side affects are NOT
---     prevented.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -98,7 +97,7 @@ signal p1_rbank :           t_rbank := (others => X"00000000");
 -- the 1024-bit 3-port reg bank, which you probably don't want.
 -- This can take the values {distributed|block}.
 attribute ram_style :       string;
-attribute ram_style of p1_rbank : signal is "distributed";
+attribute ram_style of p1_rbank : signal is XILINX_REGBANK;
 
 signal p1_rs, p1_rt :       t_word;
 signal p1_rs_rbank :        t_word;
@@ -556,9 +555,13 @@ p1_do_reg_jump <= '1' when p1_op_special='1' and p1_ir_fn(5 downto 1)="00100" el
 p1_do_zero_ext_imm <= '1' when (p1_ir_op(31 downto 28)="0011") else '0';
 
 -- Decode input data mux control (LW, LH, LB, LBU, LHU) and load enable
-p1_do_load <= '1' when p1_ir_op(31 downto 29)="100" and
-                       p2_exception='0'
-              else '0';
+p1_do_load <= '1' when 
+    p1_ir_op(31 downto 29)="100" and
+    p1_ir_op(28 downto 26)/="010" and -- LWL
+    p1_ir_op(28 downto 26)/="110" and -- LWR
+    p1_ir_op(28 downto 26)/="111" and -- LWR
+    p2_exception='0'  -- abort load if previous instruction triggered trap
+    else '0';
 
 p1_load_alu_set0 <= '1' 
     when p1_op_special='1' and 
@@ -606,8 +609,11 @@ p1_alu_op2_sel_set1 <=
 p1_alu_op2_sel <= p1_alu_op2_sel_set0 or p1_alu_op2_sel_set1;
 
 -- Decode store operations
-p1_do_store <= 
-    '1' when p1_ir_op(31 downto 29)="101" and
+p1_do_store <= '1' when 
+    p1_ir_op(31 downto 29)="101" and
+    (p1_ir_op(28 downto 26)="000" or -- SB
+     p1_ir_op(28 downto 26)="001" or -- SH
+     p1_ir_op(28 downto 26)="011") and -- SWH
     p2_exception='0'    -- abort when previous instruction triggered exception
     else '0';
 p1_store_size <= p1_ir_op(27 downto 26);
