@@ -1,16 +1,20 @@
 --##############################################################################
 -- This file was generated automatically from '/src/mips_tb1_template.vhdl'.
--- 
--- Simulates the CPU core connected to two memory block, a read-only block
+--
+--------------------------------------------------------------------------------
+-- Simulation test bench TB1 -- not synthesizable.
+--
+-- Simulates the CPU core connected to two memory blocks, a read-only block
 -- initialized with code and a read-write block initialized with all data, 
 -- including read-only data. The makefile for the source samples include targets
--- to build simulation test benches using this template.
+-- to build simulation test benches using this template -- those source samples
+-- that support this template.
 --
 -- The memory setup is meant to test the 'bare' cpu, without cache. 
---
 -- Address decoding is harcoded to that of Plasma system, for the time being.
 -- 
---
+-- Console output (at addresses compatible to Plasma's) is logged to text file
+-- "hw_sim_console_log.txt".
 -- IMPORTANT: The code that echoes UART TX data to the simulation console does
 -- line buffering; it will not print anything until it gets a CR (0x0d), and
 -- will ifnore LFs (0x0a). Bear this in mind if you see no output when you 
@@ -45,7 +49,7 @@ constant T : time           := 20 ns;
 -- WARNING: slite does not simulate this. The logs may be different when > 0.0!
 constant SIMULATED_UART_TX_TIME : time := 0.0 us;
                
--- Simulation length in clock cycles -- 2000 is enough for 'hello' sample
+-- 2000 is enough for 'hello' sample, 22000 enough for 10 digits of pi
 constant SIMULATION_LENGTH : integer := 2000;
 
 --------------------------------------------------------------------------------
@@ -93,6 +97,18 @@ signal ld_upper_hword :     std_logic;
 -- Log file
 file l_file: TEXT open write_mode is "hw_sim_log.txt";
 
+-- Console output log file
+file con_file: TEXT open write_mode is "hw_sim_console_log.txt";
+
+-- Maximum line size of for console output log. Lines longer than this will be
+-- truncated.
+constant CONSOLE_LOG_LINE_SIZE : integer := 1024*4;
+
+-- Console log line buffer
+signal con_line_buf :       string(1 to CONSOLE_LOG_LINE_SIZE);
+signal con_line_ix :        integer := 1;
+
+
 
 --------------------------------------------------------------------------------
 
@@ -107,8 +123,9 @@ signal data_addr_rd :       t_data_address;
 signal data_addr_wr :       t_data_address;
 
 -- ram0 is LSB, ram3 is MSB
-signal ram3 : t_data_ram := (    X"63",X"69",X"74",X"3A",X"6E",X"20",X"31",X"20",
-    X"33",X"35",X"67",X"76",X"69",X"20",X"34",X"00",
+signal ram3 : t_data_ram := (
+    X"63",X"69",X"74",X"3A",X"62",X"20",X"31",X"20",
+    X"30",X"38",X"67",X"76",X"69",X"20",X"34",X"00",
     X"0A",X"6C",X"57",X"64",X"0A",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -140,8 +157,9 @@ signal ram3 : t_data_ram := (    X"63",X"69",X"74",X"3A",X"6E",X"20",X"31",X"20"
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal ram2 : t_data_ram := (    X"6F",X"6C",X"69",X"20",X"20",X"32",X"20",X"32",
-    X"34",X"0A",X"63",X"65",X"6F",X"20",X"2E",X"00",
+signal ram2 : t_data_ram := (
+    X"6F",X"6C",X"69",X"20",X"20",X"32",X"20",X"31",
+    X"39",X"0A",X"63",X"65",X"6F",X"20",X"2E",X"00",
     X"0A",X"6C",X"6F",X"21",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -173,7 +191,8 @@ signal ram2 : t_data_ram := (    X"6F",X"6C",X"69",X"20",X"20",X"32",X"20",X"32"
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal ram1 : t_data_ram := (    X"6D",X"65",X"6D",X"4A",X"32",X"30",X"2D",X"33",
+signal ram1 : t_data_ram := (
+    X"6D",X"65",X"6D",X"46",X"20",X"30",X"2D",X"33",
     X"3A",X"00",X"63",X"72",X"6E",X"34",X"31",X"00",
     X"48",X"6F",X"72",X"0A",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -206,8 +225,9 @@ signal ram1 : t_data_ram := (    X"6D",X"65",X"6D",X"4A",X"32",X"30",X"2D",X"33"
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal ram0 : t_data_ram := (    X"70",X"20",X"65",X"61",X"39",X"31",X"2D",X"3A",
-    X"35",X"00",X"20",X"73",X"3A",X"2E",X"0A",X"00",
+signal ram0 : t_data_ram := (
+    X"70",X"20",X"65",X"65",X"32",X"31",X"2D",X"3A",
+    X"33",X"00",X"20",X"73",X"3A",X"2E",X"0A",X"00",
     X"65",X"20",X"6C",X"0A",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -251,7 +271,8 @@ type t_code_ram is array(0 to CODE_RAM_SIZE-1) of std_logic_vector(7 downto 0);
 signal code_addr_rd :        t_data_address;
 
 -- rom0 is LSB, rom3 is MSB
-signal rom3 : t_code_ram := (    X"3C",X"27",X"3C",X"24",X"3C",X"24",X"3C",X"27",
+signal rom3 : t_code_ram := (
+    X"3C",X"27",X"3C",X"24",X"3C",X"24",X"3C",X"27",
     X"AC",X"00",X"14",X"24",X"0C",X"00",X"08",X"23",
     X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",
     X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",
@@ -380,7 +401,8 @@ signal rom3 : t_code_ram := (    X"3C",X"27",X"3C",X"24",X"3C",X"24",X"3C",X"27"
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal rom2 : t_code_ram := (    X"1C",X"9C",X"05",X"A5",X"04",X"84",X"1D",X"BD",
+signal rom2 : t_code_ram := (
+    X"1C",X"9C",X"05",X"A5",X"04",X"84",X"1D",X"BD",
     X"A0",X"A4",X"60",X"A5",X"00",X"00",X"00",X"BD",
     X"A1",X"A2",X"A3",X"A4",X"A5",X"A6",X"A7",X"A8",
     X"A9",X"AA",X"AB",X"AC",X"AD",X"AE",X"AF",X"B8",
@@ -509,7 +531,8 @@ signal rom2 : t_code_ram := (    X"1C",X"9C",X"05",X"A5",X"04",X"84",X"1D",X"BD"
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal rom1 : t_code_ram := (    X"00",X"7F",X"00",X"00",X"00",X"02",X"00",X"02",
+signal rom1 : t_code_ram := (
+    X"80",X"7F",X"80",X"00",X"80",X"02",X"80",X"02",
     X"00",X"18",X"FF",X"00",X"00",X"00",X"00",X"FF",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -526,8 +549,8 @@ signal rom1 : t_code_ram := (    X"00",X"7F",X"00",X"00",X"00",X"02",X"00",X"02"
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"10",X"20",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"FF",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"00",X"80",X"FF",X"00",X"00",X"00",
+    X"80",X"00",X"00",X"80",X"00",X"00",X"00",X"00",
     X"20",X"00",X"00",X"00",X"FF",X"20",X"00",X"00",
     X"10",X"00",X"00",X"00",X"00",X"20",X"20",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"FF",X"00",
@@ -638,7 +661,8 @@ signal rom1 : t_code_ram := (    X"00",X"7F",X"00",X"00",X"00",X"02",X"00",X"02"
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal rom0 : t_code_ram := (    X"01",X"F0",X"01",X"58",X"01",X"60",X"01",X"48",
+signal rom0 : t_code_ram := (
+    X"00",X"F0",X"00",X"58",X"00",X"60",X"00",X"48",
     X"00",X"2A",X"FD",X"04",X"8B",X"00",X"0E",X"98",
     X"10",X"14",X"18",X"1C",X"20",X"24",X"28",X"2C",
     X"30",X"34",X"38",X"3C",X"40",X"44",X"48",X"4C",
@@ -655,8 +679,8 @@ signal rom0 : t_code_ram := (    X"01",X"F0",X"01",X"58",X"01",X"60",X"01",X"48"
     X"28",X"2C",X"08",X"00",X"00",X"04",X"08",X"0C",
     X"10",X"14",X"18",X"1C",X"20",X"24",X"28",X"2C",
     X"00",X"08",X"00",X"19",X"12",X"10",X"08",X"00",
-    X"0C",X"08",X"00",X"01",X"E8",X"14",X"A1",X"00",
-    X"01",X"A1",X"28",X"01",X"14",X"40",X"A1",X"18",
+    X"0C",X"08",X"00",X"00",X"E8",X"14",X"A1",X"00",
+    X"00",X"A1",X"28",X"00",X"14",X"40",X"A1",X"18",
     X"00",X"20",X"00",X"02",X"FC",X"00",X"00",X"08",
     X"21",X"00",X"00",X"11",X"0A",X"00",X"00",X"0D",
     X"0E",X"00",X"01",X"20",X"00",X"02",X"FC",X"00",
@@ -805,13 +829,21 @@ begin
 
     drive_uut:
     process
+    variable l : line;
     begin
         wait for T*4;
         reset <= '0';
         
         wait for T*SIMULATION_LENGTH;
         
-        print("TB0 finished");
+        -- Flush console output to log console file (in case the end of the
+        -- simulation caugh an unterminated line in the buffer)
+        if con_line_ix > 1 then
+            write(l, con_line_buf(1 to con_line_ix));
+            writeline(con_file, l);
+        end if;
+        
+        print("TB1 finished");
         done <= '1';
         wait;
         
@@ -882,20 +914,20 @@ begin
                     
                     -- UART TX data goes to output after a bit of line-buffering
                     -- and editing
-                    if uart_data = 13 then
+                    if uart_data = 10 then
                         -- CR received: print output string and clear it
-                        print(s);
-                        si := 1;
-                        for i in 1 to s'high loop
-                            s(i) := ' ';
+                        print(con_file, con_line_buf(1 to con_line_ix));
+                        con_line_ix <= 1;
+                        for i in 1 to con_line_buf'high loop
+                           con_line_buf(i) <= ' ';
                         end loop;
-                    elsif uart_data = 10 then
+                    elsif uart_data = 13 then
                         -- ignore LF
                     else
                         -- append char to output string
-                        if si < s'high then
-                            s(si) := character'val(uart_data);
-                            si := si + 1;
+                        if con_line_ix < con_line_buf'high then
+                            con_line_buf(con_line_ix) <= character'val(uart_data);
+                            con_line_ix <= con_line_ix + 1;
                         end if;
                     end if;
                 else
