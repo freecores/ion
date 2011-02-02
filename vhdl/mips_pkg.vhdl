@@ -5,6 +5,13 @@ use ieee.std_logic_unsigned.all;
 
 package mips_pkg is
 
+
+subtype t_addr_decode is std_logic_vector(31 downto 16);
+constant ADDR_BOOT : t_addr_decode      := X"0000";
+constant ADDR_XRAM : t_addr_decode      := X"8000";
+constant ADDR_IO : t_addr_decode        := X"2000";
+
+
 subtype t_addr is std_logic_vector(31 downto 0);
 subtype t_word is std_logic_vector(31 downto 0);
 subtype t_dword is std_logic_vector(63 downto 0);
@@ -47,5 +54,35 @@ constant MULT_SIGNED_MULT   : t_mult_function := "1100"; -- 24
 constant MULT_DIVIDE        : t_mult_function := "1111"; -- 26
 constant MULT_SIGNED_DIVIDE : t_mult_function := "1110"; -- 27
 
+-- Computes ceil(log2(A)), e.g. address width of memory block
+-- CAN BE USED IN SYNTHESIZABLE CODE as long as called with constant arguments
+function log2(A : natural) return natural;
+
+-- Return '1' if address A is within a given memory area
+-- CAN BE USED IN SYNTHESIZABLE CODE as long as called with constant arguments
+function addr_decode(A : std_logic_vector; mask : t_addr_decode) return std_logic;
 
 end package;
+
+package body mips_pkg is
+
+function log2(A : natural) return natural is
+begin
+    for I in 1 to 30 loop -- Works for up to 32 bit integers
+        if(2**I > A) then 
+            return(I-1);
+        end if;
+    end loop;
+    return(30);
+end function log2;
+
+function addr_decode(A : std_logic_vector; mask : t_addr_decode) return std_logic is
+begin
+    if A(mask'high downto mask'low) = mask then
+        return '1';
+    else
+        return '0';
+    end if;
+end function addr_decode;
+
+end package body;
