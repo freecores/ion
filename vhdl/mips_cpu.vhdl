@@ -220,7 +220,7 @@ p0_rt_num <= std_logic_vector(code_rd(20 downto 16)); -- also called rs2 in the 
 p2_rd_mux_control <= p2_ld_upper_hword & p2_ld_upper_byte & p2_rd_addr;
 
 -- Extension for unused bits will be zero or the sign (bit 7 or bit 15)
-p2_data_word_ext <= '0'         when p2_ld_unsigned='1' else
+p2_data_word_ext <= '0'          when p2_ld_unsigned='1' else
                     data_rd(15)  when p2_ld_upper_byte='1' else
                     data_rd(7)   when p2_rd_addr="11" else
                     data_rd(15)  when p2_rd_addr="10" else
@@ -268,7 +268,11 @@ with (p2_wback_mux_sel) select p1_rbank_wr_data <=
 
 p1_rbank_we <= '1' when (p2_do_load='1' or p1_load_alu='1' or 
                         p1_link='1' or p1_get_cp0='1') and 
+                        -- If target register is $zero, ignore write
                         p1_rbank_wr_addr/="00000" and
+                        -- if the cache controller keeps the cpu stopped, do
+                        -- not writeback
+                        mem_wait='0' and
                         -- on exception, abort next instruction (by preventing 
                         -- regbank writeback).
                         p2_exception='0'
@@ -443,8 +447,7 @@ begin
     end if;
 end process pc_register;
 
--- p0_pc_reg holds the same addr as the addr register of the external synchronous 
--- memory; what we put on the addr bus is p0_pc_next.
+-- FIXME we should not output the lowest 2 bits
 data_rd_addr <= p1_data_addr(31 downto 0);
 
 -- FIXME these two need to pushed behind a register, they are glitch-prone
@@ -820,10 +823,16 @@ begin
             else
                 pipeline_stalled <= '0';
             end if;
-            if load_interlock='1' then
-                pipeline_interlocked <= '1';
-            else
-                pipeline_interlocked <= '0';
+            
+            -- stalls caused by mem_wait and load_interlock are independent and
+            -- must not overlap; so when mem_wait='1' the cache stall takes
+            -- precedence and the loa interlock must wait.
+            if mem_wait='0' then
+                if load_interlock='1' then
+                    pipeline_interlocked <= '1';
+                else
+                    pipeline_interlocked <= '0';
+                end if;
             end if;
         end if;
     end if;
