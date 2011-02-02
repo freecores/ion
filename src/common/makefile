@@ -3,6 +3,14 @@
 # makefiles of all the code samples. 
 # It is meant to be included and not used standalone.
 #-------------------------------------------------------------------------------
+# SYSTEM PARAMETERS
+#
+# You can define here the size and address of the memory blocks of the system,
+# though you can't change the number and type of blocks here (see 
+# /vhdl/mips_cache_*.vhdl).
+# Addresses are duplicated in the linker script (ion*.lds).
+#
+#-------------------------------------------------------------------------------
 # KNOWN PROBLEMS AND WORKAROUNDS
 #
 # 1.- LINK PROBLEM IF FLAG '-G0' NOT USED
@@ -26,11 +34,6 @@
 #       This is only necessary for the 'bare' target (no external ram and no
 #       cache) and will have to be fixed for regular targets (by using a 
 #       standard link script or fixing mine).
-#-------------------------------------------------------------------------------
-# SYSTEM PARAMETERS
-#
-# All you can define here is the size of the VHDL RAM tables.
-# Some other system parameters are defined in the linker script (ion*.lds).
 #-------------------------------------------------------------------------------
 
 
@@ -74,20 +77,42 @@ endif
 
 ### System parameters ##########################################################
 
+# FIXME clean up parameter names
+# 'CODE_BRAM' is meant to be a small BRAM (2 to 4KB) used for bootstrapping.
+# 'DATA_BRAM' is a small BRAM connected to the data ports, used for debugging.
+# 'XRAM' is meant to be the main external RAM, either SRAM or SDRAM.
+
+
+# Default location of code BRAM is on the reset vector address
+CODE_BRAM_ADDRESS = 0
 # Default size of code BRAM in 32-bit words
-CODE_SIZE = 1024
+CODE_BRAM_SIZE = 1024
 # Default size of data BRAM in 32-bit words
-DATA_SIZE = 256
+DATA_BRAM_SIZE = 256
+# Default address of BRAM -- used in some simulation-only tests, see makefiles
+DATA_BRAM_ADDRESS = 0x10000
+# Default size of data external RAM (XRAM) in 32-bit words (for simulation)
+XRAM_SIZE = 2048
+# Default address of XRAM
+XRAM_ADDRESS = 0x80000000
+
 
 ### Build options ##############################################################
 
 # Don't use gcc builtin functions, and try to target MIPS-I architecture
+# This will prevent usage of unimplemented opcodes but will insert nops after
+# load instructions, which Ion does not need.
 # (See comment above about -G0 flag)
 CFLAGS = -O2 -Wall -c -s -fno-builtin -mips1 -G0
-# Use project 'bare cpu' linker script and build elf-bigendian object file
-LFLAGS = -T../ion_noxram.lds -I elf32-big -eentry
-# Pass BRAM sizes to VHDL conversion script
-VHDL_FLAGS = --code_size $(CODE_SIZE) --data_size $(DATA_SIZE)
+
+# For most simulations and demos we'll use these parameters
+# Set code to BRAM and use XRAM for data
+# This will only work for small programs that fit the BRAM
+LFLAGS_BOOT = -Ttext $(CODE_BRAM_ADDRESS) -Tdata $(XRAM_ADDRESS) -eentry -I elf32-big
+
+# For some simulations we'll want to use TB1 which requires splitting code and
+# data. Use project 'bare cpu' linker script and build elf-bigendian objects.
+LFLAGS_BARE = -T../ion_noxram.lds -I elf32-big -eentry
 
 ### Project directories ########################################################
 

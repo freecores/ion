@@ -15,9 +15,10 @@ The makefile will build a binary that you can run in the software simulator:
     slite opcodes.bin
 
 It will build a vhdl test bench at /vhdl/tb/mips_tb1.vhdl (overwriting) that you
-can try on your VHDL simulator (the provided script and the VHDL code have some
-dependence on Modelsim, see project readme file).
+can try on your VHDL simulator with script sim_tb1.do. The provided script and 
+the VHDL code have some dependence on Modelsim, see project readme file.
 
+This code can't be used on real hardware (i/o is far too simple).
 
 WARNING: the gnu assembler expands DIV* instructions, inserting code that 
 handles division by zero. Bear that in mind when reading the listing file.

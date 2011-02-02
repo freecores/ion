@@ -48,7 +48,7 @@ SECTIONS {
     
     /**** Put all data, including read-only, at DATA area */
     
-    .data 0x00010000 : {
+    .data 0x80000000 : {
         _fdata = . ;
         * (.data);
         * (.data.*);
