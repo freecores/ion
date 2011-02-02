@@ -623,6 +623,12 @@ void cycle(t_state *s, int show_mode){
     /* epc will point to the victim instruction, i.e. THIS instruction */
     epc = s->pc;
 
+    /* If we catch a jump instruction jumping to itself, assume we hit the
+       and of the program and quit. */
+    if(s->pc == s->pc_next+4){
+        printf("\n\nEndless loop at 0x%08x\n\n", s->pc-4);
+        s->wakeup = 1;
+    }
     s->pc = s->pc_next;
     s->pc_next = s->pc_next + 4;
     if(s->skip){
