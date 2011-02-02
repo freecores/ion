@@ -1,16 +1,20 @@
 --##############################################################################
 -- This file was generated automatically from '/src/mips_tb1_template.vhdl'.
--- 
--- Simulates the CPU core connected to two memory block, a read-only block
+--
+--------------------------------------------------------------------------------
+-- Simulation test bench TB1 -- not synthesizable.
+--
+-- Simulates the CPU core connected to two memory blocks, a read-only block
 -- initialized with code and a read-write block initialized with all data, 
 -- including read-only data. The makefile for the source samples include targets
--- to build simulation test benches using this template.
+-- to build simulation test benches using this template -- those source samples
+-- that support this template.
 --
 -- The memory setup is meant to test the 'bare' cpu, without cache. 
---
 -- Address decoding is harcoded to that of Plasma system, for the time being.
 -- 
---
+-- Console output (at addresses compatible to Plasma's) is logged to text file
+-- "hw_sim_console_log.txt".
 -- IMPORTANT: The code that echoes UART TX data to the simulation console does
 -- line buffering; it will not print anything until it gets a CR (0x0d), and
 -- will ifnore LFs (0x0a). Bear this in mind if you see no output when you 

@@ -16,8 +16,8 @@
 #
 #-------------------------------------------------------------------------------
 # NOTE: This test bench relies on the simulation logs to catch errors. That is,
-# unlike the original Plasma code, this one does not test the test success 
-# conditions. instead, it performs the operations to be tested and relies on you
+# unlike the original Plasma code, this one does not check the test success 
+# conditions. Instead, it performs the operations to be tested and relies on you
 # to compare the logs from the logic simulation and the software simulation.
 # Test that work this way have been commented with this tag: "@log"
 #
@@ -1211,7 +1211,7 @@ ShiftTest:
     sb      $2,0($20)
     sb      $23,0($20)
     sb      $21,0($20)
- 
+
  
 $DONE:
     j       $DONE
