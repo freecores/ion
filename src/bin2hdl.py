@@ -22,7 +22,7 @@ def usage():
     print ""
     print "Additionally, any of these arguments can be given:"
     print "{s|sim_len} <number>       Length of simulation in clock cycles"
-    print "{d|data} <filename>        Data binary image file name"
+    print "{d|data} <filename>        Data binary image file name or 'empty'"
     print "{h|help}                   Display some help text and exit"
     print "{i|indent} <number>        Indentation in VHDL tables (decimal)"
 
@@ -33,6 +33,8 @@ def help():
     print "The data columns are converted to VHDL strings and then inserted"
     print "into the vhdl template, in place of tags @code0@ .. @code3@ and "
     print "@data0@ .. @data3@. Column 0 is LSB and column3 is MSB.\n"
+    print "Tags like @data31@ and @data20@ etc. can be used to initialize"
+    print "memories in 16-bit buses, also split in byte columns.\n"
     print "Other template tags are replaced as follows:"
     print "@entity_name@         : Name of entity in target vhdl file"
     print "@arch_name@           : Name of architecture in target vhdl file"
@@ -63,7 +65,7 @@ def build_vhdl_tables(code,table_size, indent_size):
     
     # Write the data for each of the four column tables as a VHDL byte
     # constant table.
-    vhdl_data_strings = [" "*indent_size]*4
+    vhdl_data_strings = [" "*indent_size]*6
     
     for j in range(4):
         col = 0
@@ -79,7 +81,32 @@ def build_vhdl_tables(code,table_size, indent_size):
                 col = 0
                 item = item + "\n" + " "*indent_size
             vhdl_data_strings[j] = vhdl_data_strings[j] + item
-
+        vhdl_data_strings[j] = "\n" + vhdl_data_strings[j]
+    
+    # ok, now build init strings for 16-bit wide memorier, split in 2 byte 
+    # columns: an odd column with bytes 3:1 and an even column with bytes 2:0
+    byte_order = [3,1,2,0]
+    for j in range(2):
+        col = 0
+        word_count = len(tables[j*2])
+        for i in range(word_count):
+            w_high = tables[byte_order[j*2+0]][i]
+            w_low  = tables[byte_order[j*2+1]][i]
+            word_count = word_count - 1
+            if word_count > 0:
+                item_h = "X\"%02X\"," % w_high
+                item_l = "X\"%02X\"," % w_low
+            else:
+                item_h = "X\"%02X\"," % w_high
+                item_l = "X\"%02X\"" % w_low
+            item = item_h + item_l
+            col = col + 1
+            if col == 4:
+                col = 0
+                item = item + "\n" + " "*indent_size
+            vhdl_data_strings[4+j] = vhdl_data_strings[4+j] + item
+        vhdl_data_strings[4+j] = "\n" + vhdl_data_strings[4+j]
+        
     return vhdl_data_strings
     
 def main(argv):
@@ -136,6 +163,7 @@ def main(argv):
     # See if all mandatory options are there
     if code_filename=="" or vhdl_filename=="" or \
        code_table_size < 0 or data_table_size<0:
+        print "Some mandatory parameter is missing\n"
         usage()
         sys.exit(2)
 
@@ -149,12 +177,15 @@ def main(argv):
         print "Binary File %s not found" % code_filename
 
     if data_filename != "":
-        try:
-            fin = open(data_filename, "rb")
-            data = fin.read()
-            fin.close()
-        except IOError:
-            print "Binary File %s not found" % data_filename
+        if data_filename == "empty":
+            data = []
+        else:
+            try:
+                fin = open(data_filename, "rb")
+                data = fin.read()
+                fin.close()
+            except IOError:
+                print "Binary File %s not found" % data_filename
         
     #print "Read " + str(len(code)) + " bytes."
     
@@ -181,7 +212,7 @@ def main(argv):
     else:
         # In case we didn't get a data binary, we want the vhdl compilation 
         # to fail when @data@ tags are used, just to catch the error
-        vhdl_data_strings = ["error: missing data binary file"]*4
+        vhdl_data_strings = ["error: missing data binary file"]*6
     
     # Now start scanning the VHDL template, inserting data where needed
     
@@ -192,15 +223,19 @@ def main(argv):
     
     # ...and build the keyword and replacement tables
     keywords = ["@code0@","@code1@","@code2@","@code3@",
+                "@code31@", "@code20@",
                 "@data0@","@data1@","@data2@","@data3@",
+                "@data31@", "@data20@",
                 "@entity_name@","@arch_name@",
                 "@sim_len@",
+                "@xram_size@",
                 "@code_table_size@","@code_addr_size@",
                 "@data_table_size@","@data_addr_size@"];
     replacement = vhdl_code_strings + vhdl_data_strings + \
                  [entity_name, arch_name, 
                   str(simulation_length),
-                  str(code_table_size), 
+                  str(data_table_size),
+                  str(code_table_size),
                   str(int(math.floor(math.log(code_table_size,2)))),
                   str(data_table_size), 
                   str(int(math.floor(math.log(data_table_size,2))))]
