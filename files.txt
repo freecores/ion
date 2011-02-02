@@ -21,6 +21,7 @@ ion_noxram.lds              Load script for default bare system configuration
 mips_mpu_template.vhdl      Template for mpu system used in hardware demo
 mips_tb1_template.vhdl      Template for simulation test bench (main template)
 mips_tb0_template.vhdl      Template for sim. test bench (single memory block)
+mips_tb2_template.vhdl      Template for sim. test bench (dummy cache)
 
 ./src/common                Source files common to all samples
 --------------------------------------------------------------------------------
@@ -53,11 +54,13 @@ mips_cpu.vhdl               Main CPU core module (excludes caches)
 mips_shifter.vhdl           Barrel shifter module
 mips_alu.vhdl               ALU module
 mips_mult.vhdl              Multiplier/divider mudule (from Plasma)
+mips_cache_stub.vhdl        'Stub', empty cache module
 
 ./vhdl/tb                   VHDL source for simulation test bench
 --------------------------------------------------------------------------------
 txt_util.vhdl               Utility functions for string handling
 mips_tb1.vhdl               Simulation test bench (see ./doc/ion_project.txt)
+mips_tb2.vhdl               Simulation test bench (see ./doc/ion_project.txt)
 
 ./vhdl/demo                 Source files for hardware demo on DE-1 board
 --------------------------------------------------------------------------------
@@ -73,6 +76,8 @@ rx232_tx.vhdl               Barebones UART module for TX
 ================================================================================
 mips_tb1.do                 Runs test bench /vhdl/tb/mips_tb1.vhdl
 mips_tb1_wave.do            Sub-script used to set-up Modelsim's wave window
+mips_tb2.do                 Runs test bench /vhdl/tb/mips_tb2.vhdl
+mips_tb2_wave.do            Sub-script used to set-up Modelsim's wave window
 
 
 
