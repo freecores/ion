@@ -3,7 +3,7 @@ The core structure is briefly explained in section 2. The rest of this doc is
 mostly usage instructions for the test samples and custom utilities.
 
 
-Last modified: Jan/30/2011
+Last modified: Feb/02/2011
 
 Send bug reports or comments to ja_rd[at]hotmail.com
 
@@ -52,7 +52,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     4.- Interface to external SRAM on 16-bit data bus.
 
 
-    It will take a lot of svn commits to do all of the above so don't hold
+    Many of the above goals have already been accomplished but don't hold
     your breath.
 
 
@@ -63,24 +63,20 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     some basic MIPS-I code compiled with standard gcc tools (specifically, it
     can run a tiny 'hello world' program, see section 6).
     'Basic' means that the core has a number of limitations that prevent it from
-    running just any code.
+    running just any code -- mostly unimplemented instructions and skeletal
+    memory interface.
     The opcode test is included in '/src/opcodes/opcodes.s' (see section 6).
 
 
     This is the state of the CPU at this time:
 
-    ### PLASMA features not implemented yet
-        - MUL*/DIV* instructions.
-
-    ### Other MIPS-I things not implemented
-        - Invalid instruction detection & trapping.
+    ### MIPS-I things not implemented
         - Kernel/user status.
-        - RTE instruction.
+        - RTE instruction -- as of now, returns from traps with JR.
         - Most of the CP0 registers and of course all of the CP1.
         - External interrupts.
-        - Syscall instruction (very limited implementation).
 
-    ### Things implemented but not tested.
+    ### Things implemented but not fully tested.
         - Memory pause input.
 
     ### Things with provisional implementation
@@ -94,58 +90,23 @@ Send bug reports or comments to ja_rd[at]hotmail.com
             conditions; the logic to enable a load instruction that does not
             stall to overlap the next instruction is already in place.
             The interlock logic needs a stronger test bench anyway.
-
-        2.- Invalid instructions are not detected as such. Their behaviour is
-            undefined and unpredictable.
-            Invalid opcodes should trigger an exception or at least just NOP.
-            This is closely related to privilege level so it will have to wait.
-
-        3.- Trap instructions: due to the way exceptions are handled, neither
-            'break' nor 'syscall' can be executed from a jump delay slot.
-        
-        4.- MUL*/DIV* instructions are implemented and pass the opcode test, but
-            the mul/div module should be optional (through generics).
-            Besides, mul/div instructions have never been tested in hardware.
             
 
-
-    ### Synthesis results (for SVN revision 1)
-
-        Quartus/Cyclone-2 (speed grade -7)
-
-            1033 LEs + 2 M4K blocks @53 MHz -- optimized for area
-
-        ISE/Spartan3 (speed grade -5) (synthesized with 'high effort' on)
-
-            Distributed register bank:
-
-            1445 LUTs           @ 58 MHz -- speed-optimized
-            1338 LUTs           @ 37 MHz -- area-optimized
-
-            BRAM register bank:
-
-            1104 LUTs + 2 BRAM  @ 58 MHz -- speed-optimized
-            1018 LUTs + 2 BRAM  @ 37 MHZ -- area-optimized
-
-
-        Using 2 Spartam-3 2K-byte BRAMs for the 1024-bit triple-port register
-        bank looks like a waste but the choice is there.
-
-        Remember the above results are for a core with no mul/div module.
-        
-        Note the above is for revision 1. As I add functionality the area will
-        grow. I will only update the numbers if there is a difference of more
-        than 50 LUTs.
-
-        Revision 18 of the core already includes the multiplication module and
-        it size is about 470 Cyclone-2 LEs. I will update the above numbers
-        eventually...
+    ### Performance
+    
+    In my main test system, a Cyclone-2 grade -7, I'm quite sure that the core
+    with no caches but with mul/div and all other necessary functionality
+    will be below 1800 LEs, running at least at 50 MHz.
+    
+    As soon as the core is in a stable state I will include a few synthesis
+    performance numbers for common configurations.
 
 
 1.3.- Next steps
 
     * Implement efficient load interlock detection with no wasted cycles.
     * Add a couple other code samples, including one with FP arithmetic.
+    * Add support for external memory, even before building the cache.
 
 
 
@@ -157,8 +118,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 2.0.- Some general features
 
     * Synchronized to rising edge of clk only; no latches.
-    * All inputs need to be synchronous to clk, all outputs are.
-    * Syncrhonous register bank, both read and write ports.
+    * All inputs need to be synchronous to clk.
+    * Synchronous register bank, both read and write ports.
 
 
 2.1 Bus architecture
@@ -178,12 +139,17 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     The core can't read and write at the same time; this is a fundamental 
     limitation of the core structure: doing both at the same time would take 
-    one more read port in the register bank -- tooo expensive.
+    one more read port in the register bank -- too expensive.
 
     In the most basic use scenario (no external memory and no caches), code and
     data buses have a common address space but different storages and the
     architecture is strictly Harvard. As soon as caches and external memory are
     implemented, the architecture will be Modified Harvard.
+
+    Note that the basic cpu module (mips_cpu) is meant to be connected to 
+    internal, synchronous BRAMs only. Some of its outputs are not registered
+    because they needn't be. The final 'top' module will have its outputs
+    registered as necessary to limit tco to acceptable values.
 
 
 2.1.1 Code and data read bus interface
@@ -258,8 +224,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     Note that since the CPU is big endian, the MSB has the lowest address and
     LSB the highest. the memory system does not need to care about that.
 
-    Write cycles span a single clock cycle and are not subject to data-hazard
-    stalls.
+    Write cycles span a single clock cycle and never cause data-hazard stalls.
 
     This is the waveform for a basic write cycle.
 
@@ -283,27 +248,32 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     Note the two back-to-back stores to addresses 0x0800 and 0x0900. They are
     produced by two consecutive S* instructions (SB and SH in the example),
-    and can only be done this fast because of the Harvard architecture.
+    and can only be done this fast because of the Harvard architecture --
+    with a Von Neumann the read port would be used for opcode fetches too.
 
 
 2.1.3 Memory wait cycles
 
-    Memory wait cycles are still unimplemented. Actually, the logic is there
-    but has not been tested yet and will probably need some refactor to prevent
-    glitches.
+    Memory wait cycles have already been implemented and tested with a 'stub'
+    cache (module mips_cache_stub). This 'cache' is actually just an interface
+    to external 16-bit wide memory. 
+    The memory wait state logic works with this stub module but I expect it to 
 
     In short, the 'mem_wait' input will unconditionally stall all pipeline
     stages as long as it is active. It is meant to be used by the cache at cache 
     misses.
 
     Little more to say until this is done and tested...
-
+    
 
 
 2.2 Pipeline
 
     Here is where I would explain the structure of the cpu in detail; these 
     brief comments will have to until I write some real documentation.
+    
+    This section could really use a diagram; since it can take me days to draw 
+    one, that will have to wait for a further revision.
     
     This core has a 3-stage pipeline quite different from the original 
     architecture spec. Instead of trying to use the original names for the
@@ -379,12 +349,12 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     ports belong logically to stage 1 and the write port to stage 2.
     
     IMPORTANT: though the register bank read port is synchronous, its data can
-    be used in stage 1 because it is read early (the port is loaded at the same 
-    time as the instruction opcode). That is, a small part of the instruction 
-    decoding is done on stage FETCH-1. Bearing in mind that the code ram is 
-    meant to be the exact same type of block as the register bank, and we will 
-    bundle the whole ALU delay plus the reg bank delay in stage 1, it does not
-    hurt moving part of the decoding to the previous cycle.
+    be used in stage 1 because it is read early (the read port is loaded at the 
+    same time as the instruction opcode). That is, a small part of the 
+    instruction decoding is done on stage FETCH-1. Bearing in mind that the code 
+    ram is meant to be the exact same type of block as the register bank, and we 
+    will bundle the whole ALU delay plus the reg bank delay in stage 1, it does 
+    not hurt moving a tiny part of the decoding to the previous cycle.
     
     All registers but a few exceptions belong squarely to one of the pipeline
     stages:
@@ -408,7 +378,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     <register bank write port register>     :
     
     Note how the register bank ports belong in different stages even if it's
-    the same physical device. No conflict here, hazards are handled properly.
+    the same physical device. No conflict here, hazards are handled properly
+    (by explicit vhdl code, not using synthesis pragmas, etc.).
     
     
     There is a small number of global registers that don't belong to any 
@@ -420,13 +391,16 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     
     And of course there are special registers accessible to the code:
     
-        mdiv_hi_reg
-        mdiv_lo_reg
-        cp0_status
-        cp0_epc
+        mdiv_hi_reg     : register HI from multiplier block
+        mdiv_lo_reg     : register LO from multiplier block
+        cp0_status      : register CP0[status]
+        cp0_epc         : register CP0[epc]
+        cp0_cause       : register CP0[cause]
         
     These belong logically to pipeline stage 1 (can be considered an extension
     of the register bank) but have been spared the prefix for clarity.
+
+    Note that the CP0 status and cause registers are only partially implemented.
 
     Again, this needs a better explaination and a diagram.
 
@@ -450,6 +424,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     few lines, where the hazard detection logic and data register and 
     multiplexors are implemented. Note that hazard is detected separately for
     both read ports of the reg bank (p0_rbank_rs_hazard and p0_rbank_rt_hazard).
+    Note that this logic is strictly regular vhdl code -- no need to rely here
+    on the synthesis tool to add the bypass logic for us.
     
     As for conflict (b), in the original MIPS-I architecture it was the job
     of the programmer to make sure that a loaded value was not used before it
@@ -457,12 +433,11 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     This is what I call the 'load delay slot', as discussed in [2], pag. 13-1.
     
     The C toolchain needs to be set up for MIPS-I compliance in order to build
-    object code compatible with this scheme. The very first version of this
-    core worked like that. 
+    object code compatible with this scheme.
     But all succeeding versions of the MIPS architecture, including the MIPS-32
     that this core aims to be compatible with in the future, implement a 
     different scheme instead, 'load interlock' ([1], pag. 28).
-    In short, it pays to implement load interlocks.
+    In short, it pays to implement load interlocks so this core does.
     
     Load interlock is triggered in stage 1 (ALU/MEM) of the load instruction;
     when triggered, the pipeline stages 0 and 1 stall, but the pipeline stage
@@ -501,7 +476,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     ========================================================================
 
-    Note how a fetch cycle is lost.
+    Note how a fetch cycle is delayed.
 
     This waveform was produced by this code:
     
@@ -514,23 +489,20 @@ Send bug reports or comments to ja_rd[at]hotmail.com
                 ...
 
     Note how read and write cycles are spaced instead of being interleaved, as
-    they would if interlocking was implemented efficiently (in this case, there
-    was a real hazard, register $a0, but that's coincidence).
+    they would if interlocking was implemented efficiently (in this example, 
+    there was a real hazard, register $a0, but that's coincidence).
 
 
 2.5 Exceptions
 
     The only exceptions supported so far are software exceptions, and of those 
-    only the instructions BREAK and SYSCALL. 
+    only the instructions BREAK and SYSCALL and the unimplemented opcode trap.
     
-    Both do wha
+    Both do a limited version of the regular MIPS exception behavior.
     They save their own address to EPC, abort the following instruction, and
     jump to the exception vector 0x03c. All as per the specs.
-    
-    They do NOT work, however, from the delay slot of a jump instruction. This 
-    is not a serious limitation, though it migh be fixed in later versions.
-    
-    The following instructio is aborted even if it is a load or a jump.
+        
+    The following instruction is aborted even if it is a load or a jump.
     
     Plasma used to save in epc the address of the instruction after break or 
     syscall. This core will use the standard MIPS way instead.
