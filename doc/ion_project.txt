@@ -518,7 +518,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     It uses a slightly modified version of Plasma's multiplier unit. Changes
     have been commented in the source code. 
     
-    The main difference is the Plasma does  not stall the pipeline while a 
+    The main difference is the Plasma does not stall the pipeline while a 
     multiplication/division is going on. It only does when you attempt to get 
     registers HI or LO while the multiplier is still running. Only then will
     the pipeline stall until the operation completes.
@@ -550,21 +550,23 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     much more convenient and reliable than a visual inspection of the simulation
     state.
 
-    Note that there is so far only one simulation test bench which is used by
-    all the code samples (and there's just two code samples in this release of
-    the project...). The template in file '/src/mips_tb1_template.vhdl' is
-    filled in with all the necesary data (mostly memory init. strings) from the
-    code sample object file(s) and then written to '/vhdl/tb/mips_tb1.vhdl'.
-    The idea is that 'tb1' is an execution harness to be shared by all test
-    programs.
+    There are a few simulation test bench templates in the /src directory, which 
+    are used by all the code samples (and there's just two code samples in this 
+    release of the project...). 
+    The template in file '/src/mips_tb*_template.vhdl' is filled in with all 
+    the necesary data (mostly memory init. strings) from the
+    code sample object file(s) and then written to '/vhdl/tb/mips_tb*.vhdl'.
+    The idea is that these tb templates are an execution harness to be shared by 
+    all test programs. See the template comments for a quick explaination of
+    their purpose (and the reason there is more than one template).
 
-    The test bench template provided is only good to test instruction
+    The test bench templates provided are only good to test instruction
     execution and basic core functionality. As the project moves forward and
     new features are added (e.g. caches) I will add more test bench templates.
 
-    There's a second template ('/src/mips_tb0_template.vhdl') that is only
-    used with the opcode test. It's simpler than the main template and has all
-    three CPU buses connected to the same RAM. Unlike tb1, this does not
+    There's a particular template ('/src/mips_tb0_template.vhdl') that is only
+    used with the opcode test. It's simpler than the other templates and has all
+    three CPU buses connected to the same RAM. Unlike the others, this does not
     resemble the way a real synthesizable system will work, so it is only used
     for the most basic of tests (opcode operation).
 
@@ -573,11 +575,13 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     A simulation script can be found at '/sim/mips_tb1.do'. This script will
     simulate test bench file '/vhdl/tb/mips_tb1.vhdl'.
+    A second script '/sim/mips_tb2.do' would use file '/vhdl/tb/mips_tb2.vhdl'
+    and so on -- please see the source sample makefiles.
 
     The test bench file is automatically generated for each of the sample
     programs (because it contains initialized memories with the program object
     code, etc.). This is automatically done by the sample code makefile,
-    assuming you have a MIPs cross-toolchain in your computer (see section 6).
+    assuming you have a MIPS cross-toolchain in your computer (see section 6).
 
     For convenience, a pre-generated mips_tb1.vhdl is included so you can launch
     a simulation without having to install toolchains, etc. The code is that
@@ -612,12 +616,12 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     That's it, really.
 
-    Be aware that the simulation timeout is arbitrarily fixed in the test bench
-    template file. This time may or may not be enough to execute the program --
-    it happens to be just enough to run the 'hello world' program. Change it if
+    Be aware that the simulation timeout is arbitrarily fixed in the makefile. 
+    This time may or may not be enough to execute the program. Change it if
     necessary.
     I should include some means to check for program termination (perhaps a
-    debug register written to from boot.s after returning from main).
+    debug register written to from boot.s after returning from main, or vhdl
+    debug code that catches 1-instruction closed loops).
 
 
 
@@ -720,6 +724,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
                 (00000298) [03]=20000000
                 ...
 
+    (NOTE: this example taken from revision 1, yours may vary)
+
     The read cycle at pc=0x288 modifies register 0x05; that's why there are two
     lines with the same pc value.
 
@@ -752,8 +758,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     be probably modified as the project moves on.
 
     Note that the software simulation log and the modelsim log need not be the
-    same size; usually the software log will be longer because it spans a longer
-    simulated time.
+    same size; the one that spans a longer simulated time will be longer.
     The point is that both need to be identical up to the last line of the
     shortest file.
 
@@ -777,7 +782,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     to get those internal signals or just add them to the core interface. I
     would suggest adding a debug port of type record to mips_cpu -- and hope the
     synthesis tool does not choke on it. Adding individual debug ports would be
-    a PITA. I guess this is why Mentor guys took the trouble to write SygnalSpy.
+    a PITA. 
+    I guess this is why Mentor people took the trouble to write SygnalSpy.
 
     I plan to move to Symphony EDA eventually, so I'll have to fix this.
 
@@ -828,13 +834,13 @@ Send bug reports or comments to ja_rd[at]hotmail.com
             should see a welcome message after depressing the reset button.
 
     In case you need to troubleshoot, my synthesis of the default demo is
-    like this:
+    usually like this:
 
         - Selected optimization: area
         - All other options: default
-        - 1214 LEs plus 43008 memory bits (that's 14 M4K blocks)
+        - <1900 LEs plus 14 M4K blocks
         - Clock constraint met but not by much (~53 MHz)
-        - 17 warnings, mostly harmless (ugliest: unused pins, undeclared clock)
+        - ~17 warnings, mostly harmless (ugliest: unused pins, undeclared clock)
 
     Note that none of the on-board goodies are used in the demo except as noted
     in section 4.2 below.
@@ -858,7 +864,10 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     seldom been tested with other than 50MHz clocks; they should work but you
     have been warned.
 
-    The reset input is synchronized internally, you can use a raw pushbutton.
+    Though there is no reset control logic, the reset input is synchronized 
+    internally, so you can use a raw pushbutton -- you may trigger multiple 
+    resets if your pushbutton isn't tight but you'll never cause metastability 
+    trouble.
 
     Assuming you take care of all of the above, the easiest way I see to port
     the demo is just editing the top module ports ('/vhdl/demo/c2sb_demo.vhdl')
@@ -867,7 +876,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     All the code in this project is vendor agnostic (or should be, I have only
     tried it on Quartus and ISE). Specifically, it does not instance memory
     blocks (relying instead on memory inference) or clock managers or buffers.
-
+    This has its drawbacks but is an stated goal of the project -- in the long
+    run it pays, I think.
 
 
 
@@ -892,13 +902,15 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     storage) -- See section 2.1 about the buses.
 
     It loads a 'code' binary file at address 0x0 and a 'data' binary file at
-    0x10000 and then starts execution at 0x0.
-    The linker script for the code samples makes sure all the data is linked
-    with the proper addresses and ends up in the data binary file, including
-    read-only data that would normally be bundled with code (see section 2.1).
+    0x80000000 (configurable at compile time) and then starts execution at 0x0.
+    
+    Code meant for template tb1 uses a linker script that makes sure all the 
+    data is linked with the proper addresses and ends up in the data binary 
+    file, including read-only data that would normally be bundled with code 
+    (see section 2.1).
 
     Many system parameters are hardcoded, including the log file name, the
-    simulated memory size and the code and data addresses.
+    simulated memory sizes and the code and data addresses.
     The only arguments it takes are the binary code and data files:
 
     slite.exe <code binary file> <data binary file>
@@ -949,6 +961,9 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     The script has been used with Python 2.6.2. It should work with earlier
     or later versions but I haven't tested.
 
+    Note: all of the above info is in the scrip itself, and can be shown
+    with command line option -h. Since it will beb more up to date than this 
+    doc, you're advised to read the script.
 
 
 6.- Code samples
@@ -956,7 +971,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
 Directory /src directory contains a few test applications that can be simulated
 and run on real hardware, except for the opcode test which can only be
-simulated). See the readme file and the makefile for each program.
+simulated. See the readme file and the makefile for each program.
 
 The makefiles have been tested with the CodeSourcery toolchain for windows (that
 can be downloaded from www.codesourcery.com) and with the Buildroot toolchain
