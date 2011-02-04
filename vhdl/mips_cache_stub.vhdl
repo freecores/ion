@@ -1,6 +1,8 @@
 --------------------------------------------------------------------------------
 -- mips_cache_stub.vhdl -- cache module with no actual cache memory.
 --
+-- FOR SIMULATION ONLY! does not resemble structure of final cache
+--
 -- This module has the same interface as a real cache but has no cache memory.
 -- It just interfaces the CPU to the following:
 --
@@ -8,17 +10,8 @@
 --  2.- Internal 32-bit I/O bus
 --  3.- External 16-bit wide SRAM
 --
--- The SRAM memory interface signals are meant to connect directly to FPGA pins 
--- and all outputs are registered (tco should be minimal).
--- SRAM data inputs are NOT registered, though. They go through a couple muxes
--- before reaching the first register so watch out for tsetup.
--- The SRAM is assumed to be fast enough to read or write in a clock cycle.
---
--- Obviously this module provides no performance gain; on the contrary, by 
--- coupling the CPU to slow external memory (16 bit bus) it actually slows it
--- down. The purpose of this module is just to test the SRAM interface.
---
--- FIXME there HAS to be some explaination of the logic, it's not obvious!
+-- The purpose of this module is just to test the SRAM interface in simulation.
+-- It will evolve to a real cache as the project goes on.
 --
 --------------------------------------------------------------------------------
 
