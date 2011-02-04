@@ -5,7 +5,7 @@ mostly usage instructions for the test samples and custom utilities.
 
 Last modified: Feb/02/2011
 
-Send bug reports or comments to ja_rd[at]hotmail.com
+Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 
 
@@ -137,7 +137,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     which load interlocking has been implemented, the core is less efficient
     than that -- more on this later.)
 
-    The core can't read and write at the same time; this is a fundamental 
+    The core can't read and write data at the same time; this is a fundamental 
     limitation of the core structure: doing both at the same time would take 
     one more read port in the register bank -- too expensive.
 
@@ -222,7 +222,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     When byte_we(i) is active, the matching byte at data_wr should be stored
     at address data_wr_addr. byte_we(0) is for the LSB, byte_we(3) for the MSB.
     Note that since the CPU is big endian, the MSB has the lowest address and
-    LSB the highest. the memory system does not need to care about that.
+    LSB the highest. The memory system does not need to care about that.
 
     Write cycles span a single clock cycle and never cause data-hazard stalls.
 
@@ -248,16 +248,17 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     Note the two back-to-back stores to addresses 0x0800 and 0x0900. They are
     produced by two consecutive S* instructions (SB and SH in the example),
-    and can only be done this fast because of the Harvard architecture --
-    with a Von Neumann the read port would be used for opcode fetches too.
+    and can only be done this fast because of the Harvard architecture.
 
 
 2.1.3 Memory wait cycles
 
     Memory wait cycles have already been implemented and tested with a 'stub'
     cache (module mips_cache_stub). This 'cache' is actually just an interface
-    to external 16-bit wide memory. 
+    to external 16-bit wide memory meant for simulation only. It is far too
+    rough to be of any use in a real system.
     The memory wait state logic works with this stub module but I expect it to 
+    change when the final cache implementation is done.
 
     In short, the 'mem_wait' input will unconditionally stall all pipeline
     stages as long as it is active. It is meant to be used by the cache at cache 
@@ -270,7 +271,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 2.2 Pipeline
 
     Here is where I would explain the structure of the cpu in detail; these 
-    brief comments will have to until I write some real documentation.
+    brief comments will have to wait until I write some real documentation.
     
     This section could really use a diagram; since it can take me days to draw 
     one, that will have to wait for a further revision.
@@ -285,7 +286,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
         * FETCH-0   : Instruction address is in code_rd_addr bus
         * FETCH-1   : Instruction opcode is in code_rd bus
         * ALU/MEM   : ALU operation or memory read/write cycle is done OR
-                      Memory read/data address is on data_rd/wr_address bus AND
+                      Memory read/data address is on data_rd/wr_address bus OR
                       Memory write data is on data_wr bus
         * LOAD      : Memory read data is on data_rd bus
         
@@ -308,7 +309,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
      rbank[$gp]                             | 0x0001  |
      
-                        |< fetch1>|<   0   >|<   1   >|
+                        |< fetch0>|<   0   >|<   1   >|
                         
     ==== Chronogram 3.B: stages for instruction "lw a0,16(v0)" ============
                          ____      ____      ____      ____      ____
@@ -352,8 +353,9 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     be used in stage 1 because it is read early (the read port is loaded at the 
     same time as the instruction opcode). That is, a small part of the 
     instruction decoding is done on stage FETCH-1. Bearing in mind that the code 
-    ram is meant to be the exact same type of block as the register bank, and we 
-    will bundle the whole ALU delay plus the reg bank delay in stage 1, it does 
+    ram is meant to be the exact same type of block as the register bank (or 
+    faster if the register bank is implemented with distributed RAM), and we 
+    will cram the whole ALU delay plus the reg bank delay in stage 1, it does 
     not hurt moving a tiny part of the decoding to the previous cycle.
     
     All registers but a few exceptions belong squarely to one of the pipeline
@@ -379,7 +381,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     
     Note how the register bank ports belong in different stages even if it's
     the same physical device. No conflict here, hazards are handled properly
-    (by explicit vhdl code, not using synthesis pragmas, etc.).
+    (logic defined with explicit vhdl code, not with synthesis pragmas, etc.).
     
     
     There is a small number of global registers that don't belong to any 
@@ -411,7 +413,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     
     a) If an instruction needs to access a register which was modified by the
     previous instruction, we have a data hazard -- because the register bank is
-    synchronous.
+    synchronous, a memory location can't be read in the same cycle it is updated
+    -- we will get the pre-update value.
     
     b) A memory load into a register Rd produces its result a cycle late, so if
     the instruction after the load needs to access Rd there is a conflict.
@@ -425,7 +428,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     multiplexors are implemented. Note that hazard is detected separately for
     both read ports of the reg bank (p0_rbank_rs_hazard and p0_rbank_rt_hazard).
     Note that this logic is strictly regular vhdl code -- no need to rely here
-    on the synthesis tool to add the bypass logic for us.
+    on the synthesis tool to add the bypass logic for us. This gets us some
+    measure of vendor independence.
     
     As for conflict (b), in the original MIPS-I architecture it was the job
     of the programmer to make sure that a loaded value was not used before it
@@ -490,7 +494,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
 
     Note how read and write cycles are spaced instead of being interleaved, as
     they would if interlocking was implemented efficiently (in this example, 
-    there was a real hazard, register $a0, but that's coincidence).
+    there was a real hazard, register $a0, but that's coincidence -- I need to
+    find a better example in the listing files...).
 
 
 2.5 Exceptions
@@ -500,9 +505,13 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     
     Both do a limited version of the regular MIPS exception behavior.
     They save their own address to EPC, abort the following instruction, and
-    jump to the exception vector 0x03c. All as per the specs.
+    jump to the exception vector 0x03c. All as per the specs except the vector
+    address.
         
-    The following instruction is aborted even if it is a load or a jump.
+    The following instruction is aborted even if it is a load or a jump, and 
+    traps work as specified even from a delay slot -- in that case, the address
+    saved to EPF is not the victim instruction's but the preceding jump 
+    instruction's as explained in [1], pag. 64.
     
     Plasma used to save in epc the address of the instruction after break or 
     syscall. This core will use the standard MIPS way instead.
@@ -798,6 +807,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     The project includes a pre-generated demo, the 'hello world' code sample.
     This is just for convenience, so that you can launch some demo on hardware
     without installing the C toolchain.
+    
     A constraints file is provided ('/vhdl/demo/c2sb_demo.csv') which includes
     all the pin constraints for the default target board, in CSV format.
 
@@ -877,7 +887,8 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     tried it on Quartus and ISE). Specifically, it does not instance memory
     blocks (relying instead on memory inference) or clock managers or buffers.
     This has its drawbacks but is an stated goal of the project -- in the long
-    run it pays, I think.
+    run it pays, I think. Vendor-specific hardware has its uses but should not
+    be instantiated needlessly.
 
 
 
@@ -962,7 +973,7 @@ Send bug reports or comments to ja_rd[at]hotmail.com
     or later versions but I haven't tested.
 
     Note: all of the above info is in the scrip itself, and can be shown
-    with command line option -h. Since it will beb more up to date than this 
+    with command line option -h. Since it will be more up to date than this 
     doc, you're advised to read the script.
 
 
