@@ -58,21 +58,27 @@
 typedef struct s_block {
     uint32_t start;
     uint32_t size;
+    uint32_t mask;
     uint8_t  *mem;
     char     *name;
 } t_block;
 
 
-/* Here's where we define the memory areas (blocks) of the system */
-/* (make sure they don't overlap or the simulated program will crash) */
+/* Here's where we define the memory areas (blocks) of the system.
+   Memory decoding is done in the order the blocks are defined; the address
+   is anded with field .mask and then compared to field .start. If they match
+   the address modulo the field .size is used to index the memory block, giving
+   a 'mirror' effect. All of this simulates the behavior of the actual hardware.
+   Make sure the blocks don't overlap or the scheme will fail.
+*/
 
 #define NUM_MEM_BLOCKS (2)
 
 t_block default_blocks[NUM_MEM_BLOCKS] = {
     /* meant as bootstrap block, though it's read/write */
-    {VECTOR_RESET,  0x00010000, NULL, "ROM"},
+    {VECTOR_RESET,  0x00010000, 0xf0000000, NULL, "Boot"},
     /* main ram block  */
-    {0x80000000,    0x00010000, NULL, "Data"}
+    {0x80000000,    0x00001000, 0xf0000000, NULL, "Data"}
 };
 
 
@@ -252,7 +258,7 @@ void log_failed_assertions(t_state *s);
 
 /* CPU model */
 void free_cpu(t_state *s);
-void init_cpu(t_state *s);
+int init_cpu(t_state *s);
 void reset_cpu(t_state *s);
 
 /* Hardware simulation */
@@ -316,9 +322,9 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     /* point ptr to the byte in the block, or NULL is the address is unmapped */
     ptr = 0;
     for(i=0;i<NUM_MEM_BLOCKS;i++){
-        if(address >= s->blocks[i].start &&
-          address < s->blocks[i].start + s->blocks[i].size){
-            ptr = (unsigned)(s->blocks[i].mem) + address - s->blocks[i].start;
+        if((address & s->blocks[i].mask) == s->blocks[i].start){
+            ptr = (unsigned)(s->blocks[i].mem) +
+                  ((address - s->blocks[i].start) % s->blocks[i].size);
             break;
         }
     }
@@ -452,9 +458,9 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
     }
     ptr = 0;
     for(i=0;i<NUM_MEM_BLOCKS;i++){
-        if(address >= s->blocks[i].start &&
-          address < s->blocks[i].start + s->blocks[i].size){
-            ptr = (unsigned)(s->blocks[i].mem) + address - s->blocks[i].start;
+        if((address & s->blocks[i].mask) == s->blocks[i].start){
+            ptr = (unsigned)(s->blocks[i].mem) +
+                            ((address - s->blocks[i].start) % s->blocks[i].size);
             break;
         }
     }
@@ -950,33 +956,17 @@ void do_debug(t_state *s){
 /** Read binary code and data files */
 int read_program(t_state *s, uint32_t num_files, char **file_names){
     FILE *in;
-    uint32_t bytes, i, j, files_read=0;
+    uint32_t bytes, i, files_read=0;
 
     for(i=0;i<NUM_MEM_BLOCKS;i++){
         if(i<num_files){
             in = fopen(file_names[i], "rb");
             if(in == NULL){
-                for(j=0;j<i;j++){
-                    free(s->blocks[j].mem);
-                }
+                free_cpu(s);
                 printf("Can't open file %s, quitting!\n",file_names[i]);
                 getch();
                 return(2);
             }
-
-            s->blocks[i].mem = (unsigned char*)malloc(s->blocks[i].size);
-
-            if(s->blocks[i].mem == NULL){
-                for(j=0;j<i;j++){
-                    free(s->blocks[j].mem);
-                }
-                printf("Can't allocate %d bytes, quitting!\n",
-                        s->blocks[i].size);
-                getch();
-                return(2);
-            }
-
-            memset(s->blocks[i].mem, 0, s->blocks[i].size);
 
             bytes = fread(s->blocks[i].mem, 1, s->blocks[i].size, in);
             fclose(in);
@@ -992,25 +982,12 @@ int read_program(t_state *s, uint32_t num_files, char **file_names){
     }
 
     if(!files_read){
+        free_cpu(s);
         printf("No binary object files read, quitting\n");
-    }
-    else{
-        for(i=files_read;i<NUM_MEM_BLOCKS;i++){
-            s->blocks[i].mem = (unsigned char*)malloc(s->blocks[i].size);
-
-            if(s->blocks[i].mem == NULL){
-                for(j=0;j<i;j++){
-                    free(s->blocks[j].mem);
-                }
-                printf("Can't allocate %d bytes, quitting!\n",
-                        s->blocks[i].size);
-                getch();
-                return(2);
-            }
-        }
+        return 0;
     }
 
-    return 0;
+    return files_read;
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1019,7 +996,11 @@ int main(int argc,char *argv[]){
     t_state state, *s=&state;
 
     printf("MIPS-I emulator\n");
-    init_cpu(s);
+    if(!init_cpu(s)){
+        printf("Trouble allocating memory, quitting!\n");
+        getch();
+        return 1;
+    };
 
     /* do a minimal check on args */
     if(argc==3 || argc==2){
@@ -1031,7 +1012,7 @@ int main(int argc,char *argv[]){
         return 0;
     }
 
-    if(read_program(s, argc-1, &(argv[1]))){
+    if(!read_program(s, argc-1, &(argv[1]))){
         return 2;
     }
 
@@ -1172,14 +1153,26 @@ void reset_cpu(t_state *s){
     s->failed_assertions = 0; /* no failed assertions pending */
 }
 
-void init_cpu(t_state *s){
-    int i;
+int init_cpu(t_state *s){
+    int i, j;
+
     memset(s, 0, sizeof(t_state));
     s->big_endian = 1;
     for(i=0;i<NUM_MEM_BLOCKS;i++){
         s->blocks[i].start =  default_blocks[i].start;
         s->blocks[i].size =  default_blocks[i].size;
         s->blocks[i].name =  default_blocks[i].name;
-        s->blocks[i].mem = NULL;
+        s->blocks[i].mask =  default_blocks[i].mask;
+
+        s->blocks[i].mem = (unsigned char*)malloc(s->blocks[i].size);
+
+        if(s->blocks[i].mem == NULL){
+            for(j=0;j<i;j++){
+                free(s->blocks[j].mem);
+            }
+            return 0;
+        }
+        memset(s->blocks[i].mem, 0, s->blocks[i].size);
     }
+    return NUM_MEM_BLOCKS;
 }
