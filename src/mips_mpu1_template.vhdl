@@ -82,13 +82,16 @@ signal uart_read_rx :       std_logic;
 constant BRAM_SIZE : integer := @code_table_size@;
 constant BRAM_ADDR_SIZE : integer := log2(BRAM_SIZE);
 
-type t_bram is array(0 to BRAM_SIZE-1) of std_logic_vector(7 downto 0);
+--type t_bram is array(0 to BRAM_SIZE-1) of std_logic_vector(7 downto 0);
+type t_bram is array(0 to (BRAM_SIZE)-1) of t_word;
 
 -- bram0 is LSB, bram3 is MSB
-signal bram3 :              t_bram := (@code3@);
-signal bram2 :              t_bram := (@code2@);
-signal bram1 :              t_bram := (@code1@);
-signal bram0 :              t_bram := (@code0@);
+--signal bram3 :              t_bram := (@ code3@);
+--signal bram2 :              t_bram := (@ code2@);
+--signal bram1 :              t_bram := (@ code1@);
+--signal bram0 :              t_bram := (@ code0@);
+
+signal bram :               t_bram := (@code-32bit@);
 
 subtype t_bram_address is std_logic_vector(BRAM_ADDR_SIZE-1 downto 0);
 
@@ -180,11 +183,12 @@ process(clk)
 begin
     if clk'event and clk='1' then
             
-        bram_rd_data <= 
-            bram3(conv_integer(unsigned(bram_rd_addr))) &
-            bram2(conv_integer(unsigned(bram_rd_addr))) &
-            bram1(conv_integer(unsigned(bram_rd_addr))) &
-            bram0(conv_integer(unsigned(bram_rd_addr)));
+        --bram_rd_data <= 
+        --    bram3(conv_integer(unsigned(bram_rd_addr))) &
+        --    bram2(conv_integer(unsigned(bram_rd_addr))) &
+        --    bram1(conv_integer(unsigned(bram_rd_addr))) &
+        --    bram0(conv_integer(unsigned(bram_rd_addr)));
+        bram_rd_data <= bram(conv_integer(unsigned(bram_rd_addr)));
         
     end if;
 end process fpga_ram_block;

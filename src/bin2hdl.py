@@ -65,7 +65,7 @@ def build_vhdl_tables(code,table_size, indent_size):
     
     # Write the data for each of the four column tables as a VHDL byte
     # constant table.
-    vhdl_data_strings = [" "*indent_size]*6
+    vhdl_data_strings = [" "*indent_size]*7
     
     for j in range(4):
         col = 0
@@ -83,7 +83,7 @@ def build_vhdl_tables(code,table_size, indent_size):
             vhdl_data_strings[j] = vhdl_data_strings[j] + item
         vhdl_data_strings[j] = "\n" + vhdl_data_strings[j]
     
-    # ok, now build init strings for 16-bit wide memorier, split in 2 byte 
+    # ok, now build init strings for 16-bit wide memories, split in 2 byte 
     # columns: an odd column with bytes 3:1 and an even column with bytes 2:0
     byte_order = [3,1,2,0]
     for j in range(2):
@@ -106,6 +106,32 @@ def build_vhdl_tables(code,table_size, indent_size):
                 item = item + "\n" + " "*indent_size
             vhdl_data_strings[4+j] = vhdl_data_strings[4+j] + item
         vhdl_data_strings[4+j] = "\n" + vhdl_data_strings[4+j]
+        
+    # finally, build init strings for 32-bit wide memories not split into 
+    # byte columns; useful for read-only 32-bit wide BRAMs
+    byte_order = [3,2,1,0]
+    col = 0
+    word_count = len(tables[0])
+    for i in range(word_count):
+        w3 = tables[byte_order[0]][i]
+        w2 = tables[byte_order[1]][i]
+        w1 = tables[byte_order[2]][i]
+        w0 = tables[byte_order[3]][i]
+            
+        word_count = word_count - 1
+        if word_count > 0:
+            item = "X\"%02X%02X%02X%02X\"," % (w3, w2, w1, w0)
+        else:
+            item = "X\"%02X%02X%02X%02X\"" % (w3, w2, w1, w0)
+
+        col = col + 1
+        if col == 4:
+            col = 0
+            item = item + "\n" + " "*indent_size
+        vhdl_data_strings[6] = vhdl_data_strings[6] + item
+    vhdl_data_strings[6] = "\n" + vhdl_data_strings[6]
+        
+        
         
     return vhdl_data_strings
     
@@ -224,8 +250,10 @@ def main(argv):
     # ...and build the keyword and replacement tables
     keywords = ["@code0@","@code1@","@code2@","@code3@",
                 "@code31@", "@code20@",
+                "@code-32bit@",
                 "@data0@","@data1@","@data2@","@data3@",
                 "@data31@", "@data20@",
+                "@data-32bit@",
                 "@entity_name@","@arch_name@",
                 "@sim_len@",
                 "@xram_size@",
