@@ -22,15 +22,14 @@
 -- WARNING: Will only work on Modelsim; uses custom library SignalSpy.
 --##############################################################################
 
-library ieee, modelsim_lib;
+library ieee;
 use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned.all;
+use std.textio.all;
 
 use work.mips_pkg.all;
-
-use modelsim_lib.util.all;
-use std.textio.all;
+use work.mips_tb_pkg.all;
 use work.txt_util.all;
 
 
@@ -88,15 +87,17 @@ signal test :               integer := 0;
 -- Logging signals
 
 -- These are internal CPU signal mirrored using Modelsim's SignalSpy
-signal rbank :              t_rbank;
-signal pc, cp0_epc :        std_logic_vector(31 downto 2);
-signal reg_hi, reg_lo :     t_word;
-signal negate_reg_lo :      std_logic;
-signal ld_upper_byte :      std_logic;
-signal ld_upper_hword :     std_logic;
-
+--signal rbank :              t_rbank;
+--signal pc, cp0_epc :        std_logic_vector(31 downto 2);
+--signal reg_hi, reg_lo :     t_word;
+--signal negate_reg_lo :      std_logic;
+--signal ld_upper_byte :      std_logic;
+--signal ld_upper_hword :     std_logic;
+  
+signal log_info :           t_log_info;  
+  
 -- Log file
-file l_file: TEXT open write_mode is "hw_sim_log.txt";
+file log_file: TEXT open write_mode is "hw_sim_log.txt";
 
 -- Console output log file
 file con_file: TEXT open write_mode is "hw_sim_console_log.txt";
@@ -288,130 +289,14 @@ begin
             end if;
         end if;
     end process write_process;
-    
-    signalspy_rbank:
+                  
+    log_execution:
     process
     begin
-        init_signal_spy("/@entity_name@/uut/p1_rbank", "rbank", 0, -1);
-        init_signal_spy("/@entity_name@/uut/p0_pc_reg", "pc", 0, -1);
-        init_signal_spy("/@entity_name@/uut/mult_div/upper_reg", "reg_hi", 0, -1);
-        init_signal_spy("/@entity_name@/uut/mult_div/lower_reg", "reg_lo", 0, -1);
-        init_signal_spy("/@entity_name@/uut/mult_div/negate_reg", "negate_reg_lo", 0, -1);
-        init_signal_spy("/@entity_name@/uut/cp0_epc", "cp0_epc", 0, -1);
-        init_signal_spy("/@entity_name@/uut/p2_ld_upper_byte", "ld_upper_byte", 0, -1);
-        init_signal_spy("/@entity_name@/uut/p2_ld_upper_byte", "ld_upper_hword", 0, -1);
+        log_cpu_activity(clk, reset, done, 
+                         "@entity_name@/uut", log_info, "log_info", log_file);
         wait;
-    end process signalspy_rbank;
+    end process log_execution;
 
-    log_cpu_activity:
-    process(clk)
-    variable prev_rbank : t_rbank := (others => X"00000000");
-    variable ri : std_logic_vector(7 downto 0);
-    variable full_pc : t_word := (others => '0');
-    variable prev_pc : t_word := (others => '0');
-    variable prev_hi : t_word := (others => '0');
-    variable prev_lo : t_word := (others => '0');
-    variable prev_epc : std_logic_vector(31 downto 2) := (others => '0');
-    variable wr_data : t_word := (others => '0');
-    variable temp : t_word := (others => '0');
-    variable size : std_logic_vector(7 downto 0) := X"00";
-    variable prev_vma_data : std_logic := '0';
-    variable prev_rd_addr : t_word := (others => '0');
-    variable rd_size : std_logic_vector(7 downto 0) := X"00";
-    begin
-        -- we'll be sampling control & data signals at falling edge, when 
-        -- they're stable
-        if clk'event and clk='0' then
-            if reset='0' then
-            
-                -- log memory loads (data only)
-                -- IMPORTANT: memory reads should be logged first because we're
-                -- logging them the cycle after they actually happen. If you put
-                -- the log code after any other log, the order of the operations 
-                -- will appear wrong in the log even though it is not.
-                if prev_vma_data='1' then
-                    if ld_upper_hword='1' then
-                        rd_size := X"04";
-                    elsif ld_upper_byte='1' then
-                        rd_size := X"02";
-                    else
-                        rd_size := X"01";
-                    end if;
-                    print(l_file, "("& hstr(prev_pc) &") ["& hstr(prev_rd_addr) &"] <"&
-                          "**"&
-                          --hstr(rd_size)& 
-                          ">="& hstr(data_r)& " RD");
-                end if;
-                prev_vma_data := vma_data;
-                prev_rd_addr := full_rd_addr;
-                
-                -- log register changes
-                ri := X"00";
-                for i in 0 to 31 loop
-                    if prev_rbank(i)/=rbank(i) then
-                        print(l_file, "("& hstr(full_pc)& ") ["& hstr(ri)& "]="& hstr(rbank(i)));
-                    end if;
-                    ri := ri + 1;
-                end loop;
-
-                -- log aux register changes, only when pipeline is not stalled
-                if prev_lo /= reg_lo and reg_lo(0)/='U' and vma_code='1' then
-                    -- we're observing the value of reg_lo, but the mult core
-                    -- will output the negated value in some cases. We
-                    -- have to mimic that behavior.
-                    if negate_reg_lo='1' then
-                        -- negate reg_lo before displaying
-                        prev_lo := not reg_lo;
-                        prev_lo := prev_lo + 1;
-                        print(l_file, "("& hstr(full_pc)& ") [LO]="& hstr(prev_lo));
-                    else
-                        print(l_file, "("& hstr(full_pc)& ") [LO]="& hstr(reg_lo));
-                    end if;
-                end if;
-                if prev_hi /= reg_hi and reg_hi(0)/='U' and vma_code='1' then
-                    print(l_file, "("& hstr(full_pc)& ") [HI]="& hstr(reg_hi));
-                end if;                
-                if prev_epc /= cp0_epc and cp0_epc(31)/='U'  then
-                    temp := cp0_epc & "00";
-                    print(l_file, "("& hstr(full_pc)& ") [EP]="& hstr(temp));
-                end if;
-
-                -- 'remember' last value of hi and lo only when pipeline is not
-                -- stalled; that's because we don't want to be tracking the
-                -- changing values when mul/div is running (because the SW 
-                -- simulator doesn't)
-                if vma_code='1' then
-                    prev_hi := reg_hi;
-                    prev_lo := reg_lo;
-                end if;
-
-
-                full_pc := pc & "00";
-                prev_pc := full_pc;
-                prev_rbank := rbank;
-                prev_epc := cp0_epc;
-                
-                -- log memory writes
-                if byte_we/="0000" then
-                    wr_data := X"00000000";
-                    if byte_we(3)='1' then
-                        wr_data(31 downto 24) := data_w(31 downto 24);
-                    end if;
-                    if byte_we(2)='1' then
-                        wr_data(23 downto 16) := data_w(23 downto 16);
-                    end if;
-                    if byte_we(1)='1' then
-                        wr_data(15 downto  8) := data_w(15 downto  8);
-                    end if;
-                    if byte_we(0)='1' then
-                        wr_data( 7 downto  0) := data_w( 7 downto  0);
-                    end if;
-                    size := "0000" & byte_we; -- mask, really
-                    print(l_file, "("& hstr(full_pc) &") ["& hstr(full_wr_addr) &"] |"& hstr(size)& "|="& hstr(wr_data)& " WR" );
-                end if;
-
-            end if;
-        end if;
-    end process log_cpu_activity;
 
 end @arch_name@;

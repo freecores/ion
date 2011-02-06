@@ -23,17 +23,14 @@
 -- WARNING: Will only work on Modelsim; uses custom library SignalSpy.
 --##############################################################################
 
-library ieee,modelsim_lib;
+library ieee;
 use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned.all;
-use work.mips_pkg.all;
-
-
-use work.mips_pkg.all;
-
-use modelsim_lib.util.all;
 use std.textio.all;
+
+use work.mips_pkg.all;
+use work.mips_tb_pkg.all;
 use work.txt_util.all;
 
 entity @entity_name@ is
@@ -73,6 +70,7 @@ signal bram_wr_addr :       t_bram_address;
 signal bram_rd_data :       t_word;
 signal bram_wr_data :       t_word;
 signal bram_byte_we :       std_logic_vector(3 downto 0);
+signal bram_data_rd_vma :   std_logic;
 
 -- bram0 is LSB, bram3 is MSB
 signal bram3 : t_bram := (@code3@);
@@ -100,7 +98,7 @@ signal interrupt :          std_logic := '0';
 signal done :               std_logic := '0';
 
 -- interface to asynchronous 16-bit-wide external SRAM
-signal sram_address :       std_logic_vector(SRAM_ADDR_SIZE-1 downto 1);
+signal sram_address :       std_logic_vector(SRAM_ADDR_SIZE downto 1);
 signal sram_databus :       std_logic_vector(15 downto 0);
 signal sram_byte_we_n :     std_logic_vector(1 downto 0);
 signal sram_oe_n :          std_logic;
@@ -129,20 +127,9 @@ signal io_byte_we :         std_logic_vector(3 downto 0);
 --------------------------------------------------------------------------------
 -- Logging signals
 
--- These are internal CPU signal mirrored using Modelsim's SignalSpy
-signal rbank :              t_rbank;
-signal pc, cp0_epc :        std_logic_vector(31 downto 2);
-signal reg_hi, reg_lo :     t_word;
-signal negate_reg_lo :      std_logic;
-signal ld_upper_byte :      std_logic;
-signal ld_upper_hword :     std_logic;
-signal data_rd_vma :        std_logic;
-signal code_rd_vma :        std_logic;
-signal data_rd_address :    std_logic_vector(31 downto 0);
-
 
 -- Log file
-file l_file: TEXT open write_mode is "hw_sim_log.txt";
+file log_file: TEXT open write_mode is "hw_sim_log.txt";
 
 -- Console output log file
 file con_file: TEXT open write_mode is "hw_sim_console_log.txt";
@@ -154,6 +141,8 @@ constant CONSOLE_LOG_LINE_SIZE : integer := 1024*4;
 -- Console log line buffer
 signal con_line_buf :       string(1 to CONSOLE_LOG_LINE_SIZE);
 signal con_line_ix :        integer := 1;
+
+signal log_info :           t_log_info;
 
 -- Debug signals ---------------------------------------------------------------
 
@@ -210,6 +199,7 @@ begin
         data_wr         => cpu_data_wr,
                         
         mem_wait        => cpu_mem_wait,
+        cache_enable    => '1',
         
         -- interface to FPGA i/o devices
         io_rd_data      => io_rd_data,
@@ -225,6 +215,7 @@ begin
         bram_rd_addr    => bram_rd_addr,
         bram_wr_addr    => bram_wr_addr,
         bram_byte_we    => bram_byte_we,
+        bram_data_rd_vma=> bram_data_rd_vma,
         
         -- interface to asynchronous 16-bit-wide external SRAM
         sram_address    => sram_address,
@@ -303,17 +294,31 @@ begin
 
     -- Do a very basic simulation of an external SRAM
     simulated_sram:
-    process(sram_byte_we_n, sram_address)
+    process(sram_byte_we_n, sram_address, sram_oe_n)
     begin
-        -- FIXME should add OE\ to control logic
+        -- Write cycle
+        -- FIXME should add OE\ to write control logic
         if sram_byte_we_n'event or sram_address'event then
             if sram_byte_we_n(1)='0' then
                 sram1(conv_integer(unsigned(sram_address))) <= sram_databus(15 downto  8);
             end if;
             if sram_byte_we_n(0)='0' then
                 sram0(conv_integer(unsigned(sram_address))) <= sram_databus( 7 downto  0);
+            end if;            
+        end if;
+
+        -- Read cycle
+        -- FIXME should add some verification of /WE 
+        if sram_oe_n'event or sram_address'event then
+            if sram_oe_n='0' then
+                sram_databus <= 
+                    sram1(conv_integer(unsigned(sram_address))) &
+                    sram0(conv_integer(unsigned(sram_address)));
+            else
+                sram_databus <= (others => 'Z');
             end if;
         end if;
+
     end process simulated_sram;
 
 
@@ -365,144 +370,17 @@ begin
     end process simulated_io;
 
     -- UART read registers; only status, and hardwired, for the time being
+    io_rd_data <= X"00000003";
     data_uart <= data_uart_status;
     data_uart_status <= X"0000000" & "00" & uart_tx_rdy & uart_rx_rdy;
 
-
-    signalspy_rbank:
+    log_execution:
     process
     begin
-        init_signal_spy("/@entity_name@/cpu/p1_rbank", "rbank", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/p0_pc_reg", "pc", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/mult_div/upper_reg", "reg_hi", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/mult_div/lower_reg", "reg_lo", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/mult_div/negate_reg", "negate_reg_lo", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/cp0_epc", "cp0_epc", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/p2_ld_upper_byte", "ld_upper_byte", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/p2_ld_upper_byte", "ld_upper_hword", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/data_rd_vma", "data_rd_vma", 0, -1);
-        init_signal_spy("/@entity_name@/cpu/code_rd_vma", "code_rd_vma", 0, -1);
+        log_cpu_activity(clk, reset, done, 
+                         "@entity_name@/cpu", log_info, "log_info", log_file);
         wait;
-    end process signalspy_rbank;
+    end process log_execution;
 
-
-    log_cpu_activity:
-    process(clk)
-    variable prev_rbank : t_rbank := (others => X"00000000");
-    variable ri : std_logic_vector(7 downto 0);
-    variable full_pc : t_word := (others => '0');
-    variable prev_pc : t_word := (others => '0');
-    variable prev_hi : t_word := (others => '0');
-    variable prev_lo : t_word := (others => '0');
-    variable prev_epc : std_logic_vector(31 downto 2) := (others => '0');
-    variable wr_data : t_word := (others => '0');
-    variable temp : t_word := (others => '0');
-    variable size : std_logic_vector(7 downto 0) := X"00";
-    variable prev_vma_data : std_logic := '0';
-    variable prev_rd_addr : t_word := (others => '0');
-    variable prev_rd_data : t_word := (others => '0');
-    variable rd_size : std_logic_vector(7 downto 0) := X"00";
-    begin
-        -- we'll be sampling control & data signals at falling edge, when 
-        -- they're stable
-        if clk'event and clk='0' then
-            if reset='0' then
-                -- log loads (data only)
-                -- IMPORTANT: memory reads should be logged first because we're
-                -- logging them the cycle after they actually happen. If you put
-                -- the log code after any other log, the order of the operations 
-                -- will appear wrong in the log even though it is not.
-                if prev_vma_data='1' and cpu_mem_wait='0' then
-                    if ld_upper_hword='1' then
-                        rd_size := X"04";
-                    elsif ld_upper_byte='1' then
-                        rd_size := X"02";
-                    else
-                        rd_size := X"01";
-                    end if;
-                    print(l_file, "("& hstr(prev_pc) &") ["& hstr(prev_rd_addr) &"] <"&
-                          "**"&
-                          --hstr(rd_size)& 
-                          ">="& hstr(cpu_data_rd)& " RD");
-                end if;
-                
-                prev_rd_data := cpu_data_rd;
-                if cpu_mem_wait='0' then
-                    prev_vma_data := data_rd_vma;
-                    prev_rd_addr := full_rd_addr;
-                end if;
-                
-                -- log register changes
-                ri := X"00";
-                for i in 0 to 31 loop
-                    if prev_rbank(i)/=rbank(i) then
-                        print(l_file, "("& hstr(full_pc)& ") ["& hstr(ri)& "]="& hstr(rbank(i)));
-                    end if;
-                    ri := ri + 1;
-                end loop;
-
-                -- log aux register changes, only when pipeline is not stalled
-                if prev_lo /= reg_lo and reg_lo(0)/='U' and code_rd_vma='1' then
-                    -- we're observing the value of reg_lo, but the mult core
-                    -- will output the negated value in some cases. We
-                    -- have to mimic that behavior.
-                    if negate_reg_lo='1' then
-                        -- negate reg_lo before displaying
-                        prev_lo := not reg_lo;
-                        prev_lo := prev_lo + 1;
-                        print(l_file, "("& hstr(full_pc)& ") [LO]="& hstr(prev_lo));
-                    else
-                        print(l_file, "("& hstr(full_pc)& ") [LO]="& hstr(reg_lo));
-                    end if;
-                end if;
-                if prev_hi /= reg_hi and reg_hi(0)/='U' and code_rd_vma='1' then
-                    print(l_file, "("& hstr(full_pc)& ") [HI]="& hstr(reg_hi));
-                end if;                
-                if prev_epc /= cp0_epc and cp0_epc(31)/='U'  then
-                    temp := cp0_epc & "00";
-                    print(l_file, "("& hstr(full_pc)& ") [EP]="& hstr(temp));
-                end if;
-
-                -- 'remember' last value of hi and lo only when pipeline is not
-                -- stalled; that's because we don't want to be tracking the
-                -- changing values when mul/div is running (because the SW 
-                -- simulator doesn't)
-                if code_rd_vma='1' then
-                    prev_hi := reg_hi;
-                    prev_lo := reg_lo;
-                end if;
-
-
-                full_pc := pc & "00";
-                prev_pc := full_pc;
-                prev_rbank := rbank;
-                prev_epc := cp0_epc;
-                
-                -- log writes
-                if cpu_byte_we/="0000" then
-                    wr_data := X"00000000";
-                    if cpu_byte_we(3)='1' then
-                        wr_data(31 downto 24) := cpu_data_wr(31 downto 24);
-                    end if;
-                    if cpu_byte_we(2)='1' then
-                        wr_data(23 downto 16) := cpu_data_wr(23 downto 16);
-                    end if;
-                    if cpu_byte_we(1)='1' then
-                        wr_data(15 downto  8) := cpu_data_wr(15 downto  8);
-                    end if;
-                    if cpu_byte_we(0)='1' then
-                        wr_data( 7 downto  0) := cpu_data_wr( 7 downto  0);
-                    end if;
-                    size := "0000" & cpu_byte_we; -- mask, really
-                    print(l_file, "("& hstr(full_pc) &") ["& hstr(full_wr_addr) &"] |"& hstr(size)& "|="& hstr(wr_data)& " WR" );
-                end if;
-                
-                if full_code_addr(31 downto 28)="1111" then
-                    print(l_file, "ERROR: Code addressed upper memory area" );
-                end if;
-
-            end if;
-        end if;
-    end process log_cpu_activity;
     
 end architecture @arch_name@;

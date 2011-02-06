@@ -1,3 +1,9 @@
+--------------------------------------------------------------------------------
+-- DEPRECATED -- Do not use, see new makefiles.
+-- Should use mpu1_template instead. This file is to be removed.
+--------------------------------------------------------------------------------
+
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
@@ -5,27 +11,32 @@ use ieee.std_logic_unsigned.all;
 use work.mips_pkg.all;
 
 entity mips_mpu is
-    generic(
-        mult_type       : string  := "NONE"; -- {NONE|SEQUENTIAL}
-        ld_interlock    : boolean := FALSE
+    generic (
+        BRAM_ADDR_SIZE : integer := 10;
+        SRAM_ADDR_SIZE : integer := 17
     );
     port(
         clk             : in std_logic;
         reset           : in std_logic;
         interrupt       : in std_logic;
+        
+        -- interface to FPGA i/o devices
+        io_rd_data      : in std_logic_vector(31 downto 0);
+        io_rd_addr      : out std_logic_vector(31 downto 2);
+        io_wr_addr      : out std_logic_vector(31 downto 2);
+        io_wr_data      : out std_logic_vector(31 downto 0);
+        io_rd_vma       : out std_logic;
+        io_byte_we      : out std_logic_vector(3 downto 0);
+        
+        -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
+        sram_address    : out std_logic_vector(SRAM_ADDR_SIZE downto 1);
+        sram_databus    : inout std_logic_vector(15 downto 0);
+        sram_byte_we_n  : out std_logic_vector(1 downto 0);
+        sram_oe_n       : out std_logic;
 
-        rd_addr         : out std_logic_vector(31 downto 0);
-        data_r          : in std_logic_vector(31 downto 0);
-        vma_data        : out std_logic;
-        
-        wr_addr         : out std_logic_vector(31 downto 2);
-        byte_we         : out std_logic_vector(3 downto 0);
-        data_w          : out std_logic_vector(31 downto 0);
-        
+        -- UART 
         uart_rxd        : in std_logic;
-        uart_txd        : out std_logic;
-
-        mem_wait        : in std_logic
+        uart_txd        : out std_logic
     );
 end; --entity mips_mpu
 
@@ -174,9 +185,6 @@ begin
 
 --------------------------------------------------------------------------------
 
-data_w <= cpu_data_w;
-wr_addr <= cpu_wr_addr;
-vma_data <= cpu_vma_data;
 
 --------------------------------------------------------------------------------
 
@@ -203,7 +211,7 @@ serial_tx : entity work.rs232_tx port map(
 );
 
 -- UART read registers; only status, and hardwired, for the time being
-data_uart <= data_uart_status; -- FIXEM no data rx yet
+data_uart <= data_uart_status; -- FIXME no data rx yet
 data_uart_status <= X"0000000" & "00" & uart_tx_rdy & uart_rx_rdy;
 
 
