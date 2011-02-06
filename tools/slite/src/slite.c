@@ -198,13 +198,14 @@ typedef struct s_state {
    int r[32];
    int opcode;
    int pc, pc_next, epc;
+   uint32_t op_addr;            /**< address of opcode being simulated */
    unsigned int hi;
    unsigned int lo;
    int status;
    unsigned cp0_cause;
    int userMode;
    int processId;
-   int exceptionId;        /**< DEPRECATED, to be removed */
+   int exceptionId;             /**< DEPRECATED, to be removed */
    int faultAddr;
    int irqStatus;
    int skip;
@@ -264,20 +265,17 @@ void reset_cpu(t_state *s);
 /* Hardware simulation */
 int mem_read(t_state *s, int size, unsigned int address, int log);
 void mem_write(t_state *s, int size, unsigned address, unsigned value, int log);
-void start_load(t_state *s, int rt, int data);
+void start_load(t_state *s, uint32_t addr, int rt, int data);
 
 
 /*---- Local functions -------------------------------------------------------*/
 
 /** Log to file a memory read operation (not including target reg change) */
 void log_read(t_state *s, int full_address, int word_value, int size, int log){
-   if(s->t.log!=NULL && log!=0){
-      if(size==4){ size=0x04; }
-      else if(size==2){ size=0x02; }
-      else { size=0x01; }
-      fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD\n",
-              s->pc, full_address, /*size,*/ word_value);
-   }
+    if(s->t.log!=NULL && log!=0){
+        fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD\n",
+              s->op_addr, full_address, word_value);
+    }
 }
 
 /** Read memory, optionally logging */
@@ -289,7 +287,7 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     switch(address){
     case UART_READ:
         word_value = 0x00000001;
-        log_read(s, full_address, word_value, size, log);
+        //log_read(s, full_address, word_value, size, log);
         return word_value;
         /* FIXME Take input from text file */
         /*
@@ -311,7 +309,7 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
        */
        /* FIXME Optionally simulate UART TX delay */
        word_value = 0x00000003; /* Ready to TX and RX */
-       log_read(s, full_address, word_value, size, log);
+       //log_read(s, full_address, word_value, size, log);
        return word_value;
     case MMU_PROCESS_ID:
        return s->processId;
@@ -380,7 +378,7 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
         printf("ERROR");
     }
 
-    log_read(s, full_address, word_value, size, log);
+    //log_read(s, full_address, value, size, log);
     return(value);
 }
 
@@ -430,7 +428,7 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
         }
 
         fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR\n",
-                s->pc, address, mask, dvalue);
+                s->op_addr, address, mask, dvalue);
     }
 
     switch(address){
@@ -468,7 +466,7 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
         /* address out of mapped blocks: log and return zero */
         if(s->t.log!=NULL && log!=0){
             fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR UNMAPPED\n",
-                s->pc, address, mask, dvalue);
+                s->op_addr, address, mask, dvalue);
         }
         return;
     }
@@ -566,8 +564,9 @@ void mult_big_signed(int a,
 }
 
 /** Load data from memory (used to simulate load delay slots) */
-void start_load(t_state *s, int rt, int data){
+void start_load(t_state *s, uint32_t addr, int rt, int data){
     /* load delay slot not simulated */
+    log_read(s, addr, data, 1, 1);
     s->r[rt] = data;
 }
 
@@ -581,11 +580,6 @@ void cycle(t_state *s, int show_mode){
     int *r=s->r;
     unsigned int *u=(unsigned int*)s->r;
     unsigned int ptr, epc, rSave;
-
-    if(!show_mode){
-        /* if we're NOT showing output to console, log state of CPU to file */
-        log_cycle(s);
-    }
 
     opcode = mem_read(s, 4, s->pc, 0);
     op = (opcode >> 26) & 0x3f;
@@ -635,6 +629,7 @@ void cycle(t_state *s, int show_mode){
         printf("\n\nEndless loop at 0x%08x\n\n", s->pc-4);
         s->wakeup = 1;
     }
+    s->op_addr = s->pc;
     s->pc = s->pc_next;
     s->pc_next = s->pc_next + 4;
     if(s->skip){
@@ -751,24 +746,24 @@ void cycle(t_state *s, int show_mode){
     case 0x17:/*BGTZL*/ lbranch=r[rs]>0;         break;
 //      case 0x1c:/*MAD*/  break;   /*IV*/
     case 0x20:/*LB*/    //r[rt]=(signed char)mem_read(s,1,ptr,1);  break;
-                        start_load(s, rt,(signed char)mem_read(s,1,ptr,1));
+                        start_load(s, ptr, rt,(signed char)mem_read(s,1,ptr,1));
                         break;
 
     case 0x21:/*LH*/    //r[rt]=(signed short)mem_read(s,2,ptr,1); break;
-                        start_load(s, rt, (signed short)mem_read(s,2,ptr,1));
+                        start_load(s, ptr, rt, (signed short)mem_read(s,2,ptr,1));
                         break;
     case 0x22:/*LWL*/   //target=8*(ptr&3);
                         //r[rt]=(r[rt]&~(0xffffffff<<target))|
                         //      (mem_read(s,4,ptr&~3)<<target); break;
                         break;
     case 0x23:/*LW*/    //r[rt]=mem_read(s,4,ptr,1);   break;
-                        start_load(s, rt, mem_read(s,4,ptr,1));
+                        start_load(s, ptr, rt, mem_read(s,4,ptr,1));
                         break;
     case 0x24:/*LBU*/   //r[rt]=(unsigned char)mem_read(s,1,ptr,1); break;
-                        start_load(s, rt, (unsigned char)mem_read(s,1,ptr,1));
+                        start_load(s, ptr, rt, (unsigned char)mem_read(s,1,ptr,1));
                         break;
     case 0x25:/*LHU*/   //r[rt]= (unsigned short)mem_read(s,2,ptr,1);
-                        start_load(s, rt, (unsigned short)mem_read(s,2,ptr,1));
+                        start_load(s, ptr, rt, (unsigned short)mem_read(s,2,ptr,1));
                         break;
     case 0x26:/*LWR*/   //target=32-8*(ptr&3);
                         //r[rt]=(r[rt]&~((unsigned int)0xffffffff>>target))|
@@ -784,7 +779,7 @@ void cycle(t_state *s, int show_mode){
     case 0x2e:/*SWR*/   break; //FIXME
     case 0x2f:/*CACHE*/ break;
     case 0x30:/*LL*/    //r[rt]=mem_read(s,4,ptr);   break;
-                        start_load(s, rt, mem_read(s,4,ptr,1));
+                        start_load(s, ptr, rt, mem_read(s,4,ptr,1));
                         break;
 //      case 0x31:/*LWC1*/ break;
 //      case 0x32:/*LWC2*/ break;
@@ -805,6 +800,8 @@ void cycle(t_state *s, int show_mode){
         printf("ERROR2 address=0x%x opcode=0x%x\n", s->pc, opcode);
         s->wakeup=1;
     }
+
+    /* adjust next PC if this was a ajump instruction */
     s->pc_next += (branch || lbranch == 1) ? imm_shift : 0;
     s->pc_next &= ~3;
     s->skip = (lbranch == 0) | skip2;
@@ -833,6 +830,13 @@ void cycle(t_state *s, int show_mode){
         s->userMode = 0;
         //s->wakeup = 1;
     }
+
+    /* if we're NOT showing output to console, log state of CPU to file */
+    if(!show_mode){
+        log_cycle(s);
+    }
+
+
 
     /* if this instruction was any kind of branch that actually jumped, then
        the next instruction will be in a delay slot. Remember it. */
@@ -1079,6 +1083,7 @@ void dump_trace_buffer(t_state *s){
 void log_cycle(t_state *s){
     static unsigned int last_pc = 0;
     int i;
+    uint32_t log_pc;
 
     /* store PC in trace buffer only if there was a jump */
     if(s->pc != (last_pc+4)){
@@ -1089,24 +1094,28 @@ void log_cycle(t_state *s){
 
     /* if file logging is enabled, dump a trace log to file */
     if(s->t.log!=NULL){
+        log_pc = s->op_addr;
+
         for(i=0;i<32;i++){
             if(s->t.pr[i] != s->r[i]){
-                fprintf(s->t.log, "(%08X) [%02X]=%08X\n", s->pc, i, s->r[i]);
+                fprintf(s->t.log, "(%08X) [%02X]=%08X\n", log_pc, i, s->r[i]);
             }
             s->t.pr[i] = s->r[i];
         }
         if(s->lo != s->t.lo){
-            fprintf(s->t.log, "(%08X) [LO]=%08X\n", s->pc, s->lo);
+            fprintf(s->t.log, "(%08X) [LO]=%08X\n", log_pc, s->lo);
         }
         s->t.lo = s->lo;
 
         if(s->hi != s->t.hi){
-            fprintf(s->t.log, "(%08X) [HI]=%08X\n", s->pc, s->hi);
+            fprintf(s->t.log, "(%08X) [HI]=%08X\n", log_pc, s->hi);
         }
         s->t.hi = s->hi;
 
+        /* */
+        /* FIXME epc may change by direct write too, handle case */
         if(s->epc != s->t.epc){
-            fprintf(s->t.log, "(%08X) [EP]=%08X\n", s->pc, s->epc);
+            fprintf(s->t.log, "(%08X) [EP]=%08X\n", log_pc, s->epc);
         }
         s->t.epc = s->epc;
     }
