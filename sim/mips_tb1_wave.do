@@ -18,8 +18,15 @@ add wave -noupdate -color {Dark Olive Green} -format Logic /mips_tb1/uut/stall_p
 add wave -noupdate -color {Dark Olive Green} -format Logic /mips_tb1/uut/pipeline_stalled
 add wave -noupdate -color {Indian Red} -format Literal -radix hexadecimal /mips_tb1/uut/p1_ir_reg
 add wave -noupdate -divider Debug
+add wave -noupdate -format Logic /mips_tb1/log_info.write_pending
+add wave -noupdate -format Logic /mips_tb1/log_info.read_pending
+add wave -noupdate -format Literal -radix hexadecimal /mips_tb1/log_info.pc
+add wave -noupdate -format Literal -radix hexadecimal /mips_tb1/log_info.pc_m1
+add wave -noupdate -format Literal -radix hexadecimal /mips_tb1/log_info.pc_m2
+add wave -noupdate -format Literal -radix hexadecimal /mips_tb1/log_info.present_code_rd_addr
+add wave -noupdate -format Logic /mips_tb1/uut/p1_exception
 TreeUpdate [SetDefaultTree]
-WaveRestoreCursors {{Cursor 1} {13810000 ps} 0}
+WaveRestoreCursors {{Cursor 1} {3050000 ps} 0}
 configure wave -namecolwidth 150
 configure wave -valuecolwidth 51
 configure wave -justifyvalue left
@@ -33,4 +40,4 @@ configure wave -gridperiod 1
 configure wave -griddelta 40
 configure wave -timeline 0
 update
-WaveRestoreZoom {0 ps} {42094500 ps}
+WaveRestoreZoom {3036429 ps} {3143662 ps}
