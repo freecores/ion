@@ -1,11 +1,13 @@
 This file contains instructions and notes about the Ion CPU core project.
 The core structure is briefly explained in section 2. The rest of this doc is 
 mostly usage instructions for the test samples and custom utilities.
+In its present state it' more a reminder to myself than a proper explaination of
+the system.
 
-
-Last modified: Feb/02/2011
+Last modified: Feb/06/2011
 
 Send bug reports or comments to ja_rd[at]hotmail[dot]com
+
 
 
 
@@ -77,7 +79,8 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         - External interrupts.
 
     ### Things implemented but not fully tested.
-        - Memory pause input.
+        - Memory pause input -- tested with a stub cache module only, it will
+          most certainly change.
 
     ### Things with provisional implementation
 
@@ -90,6 +93,13 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
             conditions; the logic to enable a load instruction that does not
             stall to overlap the next instruction is already in place.
             The interlock logic needs a stronger test bench anyway.
+        2.- Documentation is too sparse and source code is barely commented.
+            This is critical and I plan to fix it ASAP.
+        3.- The MPU template is not suitable for synthesis on Xilinx hardware --
+            it will use much more memory than necessary. I have to replace the
+            four rom 8-bit slices with a single 32-bit block. Slices were needed
+            to support write cycles on BRAM but the new MPU template does not
+            do that. Changes needed in the template and the python script.
             
 
     ### Performance
@@ -106,8 +116,10 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     * Implement efficient load interlock detection with no wasted cycles.
     * Add a couple other code samples, including one with FP arithmetic.
-    * Add support for external memory, even before building the cache.
+    * Add a simple mini-bootloader that can load programs onto external RAM 
+      from an SD card -- a very simple assembly program that can fit in 4KB.
 
+    
 
 
 
@@ -255,8 +267,8 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     Memory wait cycles have already been implemented and tested with a 'stub'
     cache (module mips_cache_stub). This 'cache' is actually just an interface
-    to external 16-bit wide memory meant for simulation only. It is far too
-    rough to be of any use in a real system.
+    to external 16-bit wide memory that has only been barely tested on real 
+    hardware.
     The memory wait state logic works with this stub module but I expect it to 
     change when the final cache implementation is done.
 
@@ -539,6 +551,25 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     explaining and some ascii chronogram. Again, TBD.
 
 
+2.7.- Cache
+
+    As of revision 53, there is a first synthesizable version of the cache, a 
+    'stub' with almost no functionality meant to bring the system up.
+    the cache in its present state (rev. 53) is just an interface to external
+    static RAM and internal FPGA block RAM as read-only, plus some minimal
+    support for I/O (used to access the UART).
+    It will be used to test the cache logic with a very simplified system (a 
+    single word for code and data instead of the more usual 1K-word).
+    
+    The code is quite messy and uncommented; and I'm not going to write any 
+    explainations here just yet (no time). Yet, the logic is relatively simple
+    (no matter how ugly the code is) and fast enough not to bring the system 
+    speed below my 50 MHz informal target. So I think I'm on the good track.
+    
+    Information and diagrams ASAP.
+
+
+
 3.- Logic simulation
 ================================================================================
 
@@ -586,6 +617,9 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     simulate test bench file '/vhdl/tb/mips_tb1.vhdl'.
     A second script '/sim/mips_tb2.do' would use file '/vhdl/tb/mips_tb2.vhdl'
     and so on -- please see the source sample makefiles.
+    
+    As of revision 53, you should use tb1 for the opcode test and tb2 for all 
+    other code samples.
 
     The test bench file is automatically generated for each of the sample
     programs (because it contains initialized memories with the program object
@@ -682,6 +716,13 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         mask    => Byte-enable mask (2-digit hex)
         value   => Write data
 
+        The PC value is the address of the instruction that caused the logged
+        change, NOT the actual value of the PC at the time of the change. 
+        This is so to make the hardware logger's life easier -- the SW simulator
+        and the real HW don't work exactly the same when the cache starts 
+        stalling the cpu (which the SW does not simulate) and the best reference
+        point for all instructions is their own adddress.
+
         The mask will have a '1' at bits 3..0 for each byte write-enabled. MSB
         is bit 3, LSB is bit 0. Note that the data is big endian, so the MSB
         is actually the LOWER address. The upper nibble of the mask is always 0.
@@ -703,9 +744,6 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         address => Read address
         <**>    => Padding (ignore)
         value   => Read data
-
-        Pc is the Pc value at the time the load cycle starts (usually the
-        instruction following the load).
 
         Note that in the real machine, the data is read into the cpu one cycle
         after the address bus is output (because the memory is synchronous) so
@@ -762,8 +800,8 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     the listing...
 
 
-    The log file format is hardcoded into the simulation test bench template
-    vhdl source and the software simulator C source that implement it. It will
+    The log file format is hardcoded into vhdl package mips_sim_pkg
+    and the software simulator C source that implement it. It will
     be probably modified as the project moves on.
 
     Note that the software simulation log and the modelsim log need not be the
@@ -804,7 +842,13 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 4.1.- Pre-generated demo
 
-    The project includes a pre-generated demo, the 'hello world' code sample.
+    The project includes two synthesizable code samples, a 'Hello world' demo
+    and a memory tester. Only the 'hello' demo is included in pre-generated 
+    form, the other has to be built using the included makefile.
+
+
+    One of the code samples is included pre-generated, the 'hello world' code 
+    sample.
     This is just for convenience, so that you can launch some demo on hardware
     without installing the C toolchain.
     
@@ -855,9 +899,18 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     Note that none of the on-board goodies are used in the demo except as noted
     in section 4.2 below.
 
+    In order to generate the demos (not using the pre-generated file) you
+    have to use the makefiles provided with the code samples. Please see 
+    the sample readme files and the makefiles for details. In short, provided
+    you have a MIPS toolchain installed and Python 2.5, all you have to do
+    is run make (which will automatically build all the vhdl files where they
+    need to be, etc.) and run the synthesis.
+    
 
 
 4.2.- Porting to other dev boards
+
+    I will only deal here with the 'hello' demo.
 
     The demo should be easily portable to any board which has all of this:
 
@@ -890,6 +943,11 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     run it pays, I think. Vendor-specific hardware has its uses but should not
     be instantiated needlessly.
 
+
+    The memory test demo, on the other hand, uses the external static RAM on
+    the DE-1 board. Porting it involves only adapting the memory interface 
+    signals and should be quite straightforward. You're on your own, though.
+     
 
 
 5.- Tools
@@ -992,8 +1050,13 @@ Most makefiles have two targets, to create a simulation test bench and a
 synthesizable demo.
 
 Target '*_sim' (e.g. 'hello_sim') will build the simulation test bench as vhdl
-file '/vhdl/tb/mips_tb1.vhdl'. This is the default test bench expected by the
-simulation script '/sim/mips_tb1.do'.
+file '/vhdl/tb/mips_tb2.vhdl'. This is the default test bench expected by the
+simulation script '/sim/mips_tb2.do'. Sample 'opcodes' is special in this
+regard, it will use mips_tb1 and should be run with '/sim/mips_tb1.do'.
+
+The two test benches differ in the memory structure they simulate, please read
+the sources (preferably the templates, which will be uncluttered with object 
+code).
 
 Target '*_demo' will build a synthesizable demo as '/vhdl/demo/mips_mpu.vhdl'.
 
