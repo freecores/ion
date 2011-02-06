@@ -1,8 +1,8 @@
---#############################################################################
+--##############################################################################
 -- ION MIPS-compatible CPU demo on Terasic DE-1 Cyclone-II starter board
---#############################################################################
+--##############################################################################
 -- This module is little more than a wrapper around the CPU and its memories.
---#############################################################################
+--##############################################################################
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -64,6 +64,8 @@ architecture minimal of c2sb_demo is
 --##############################################################################
 -- 
 
+constant SRAM_ADDR_SIZE : integer := 18;
+
 --##############################################################################
 -- RS232 interface signals
 
@@ -115,37 +117,49 @@ signal reg_sd_dout :        std_logic;
 signal reg_sd_clk :         std_logic;
 signal reg_sd_cs :          std_logic;
 
-signal cpu_rd_addr :        std_logic_vector(31 downto 0);
-signal cpu_rd_data :        std_logic_vector(31 downto 0);
-signal prev_rd_addr :       std_logic_vector(31 downto 28);
-signal cpu_vma_data :       std_logic;
-
-signal cpu_wr_addr :        std_logic_vector(31 downto 2);
-signal cpu_wr_data :        std_logic_vector(31 downto 0);
-signal cpu_byte_we :        std_logic_vector(3 downto 0);
-
+-- MPU interface signals
 signal data_uart :          std_logic_vector(31 downto 0);
-
 signal data_uart_status :   std_logic_vector(31 downto 0);
 signal uart_tx_rdy :        std_logic := '1';
 signal uart_rx_rdy :        std_logic := '1';
+
+signal io_rd_data :         std_logic_vector(31 downto 0);
+signal io_rd_addr :         std_logic_vector(31 downto 2);
+signal io_wr_addr :         std_logic_vector(31 downto 2);
+signal io_wr_data :         std_logic_vector(31 downto 0);
+signal io_rd_vma :          std_logic;
+signal io_byte_we :         std_logic_vector(3 downto 0);
+
+signal mpu_sram_address :   std_logic_vector(SRAM_ADDR_SIZE downto 1);
+signal mpu_sram_databus :   std_logic_vector(15 downto 0);
+signal mpu_sram_byte_we_n : std_logic_vector(1 downto 0);
+signal mpu_sram_oe_n :      std_logic;
+
 
 
 begin
 
     mpu: entity work.mips_mpu
+    generic map (
+        SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
+    )
     port map (
         interrupt   => '0',
         
-        rd_addr     => cpu_rd_addr,
-        vma_data    => cpu_vma_data,
-        data_r      => cpu_rd_data,
+        -- interface to FPGA i/o devices
+        io_rd_data  => io_rd_data,
+        io_rd_addr  => io_rd_addr,
+        io_wr_addr  => io_wr_addr,
+        io_wr_data  => io_wr_data,
+        io_rd_vma   => io_rd_vma,
+        io_byte_we  => io_byte_we,
         
-        wr_addr     => cpu_wr_addr,
-        data_w      => cpu_wr_data,
-        byte_we     => cpu_byte_we,
+        -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
+        sram_address    => mpu_sram_address,
+        sram_databus    => sram_data,
+        sram_byte_we_n  => mpu_sram_byte_we_n,
+        sram_oe_n       => mpu_sram_oe_n,
 
-        mem_wait    => '0',
         
         uart_rxd    => rxd,
         uart_txd    => txd,
@@ -155,8 +169,8 @@ begin
     );
 
 
-reg_display <= cpu_wr_addr(17 downto 2);
-reg_gleds <= cpu_vma_data & "000" & cpu_byte_we;
+reg_display <= io_wr_data(15 downto 0);
+reg_gleds <= io_rd_vma & "000" & io_byte_we;
 
 -- red leds (light with '1') -- some CPU control signals 
 red_leds(0) <= '0';
@@ -180,7 +194,6 @@ red_leds(9) <= clk_1hz;
 --##############################################################################
 
 flash_addr <= (others => '0');
-
 flash_we_n <= '1'; -- all enable signals inactive
 flash_oe_n <= '1';
 flash_reset_n <= '1';
@@ -192,14 +205,12 @@ flash_reset_n <= '1';
 -- NOTE: All writes go to SRAM independent of rom paging status
 --##############################################################################
 
--- SRAM disabled for the time being
-sram_addr <= (others => '0');
-sram_data <= (others => 'Z');
-sram_oe_n <= '1';
-sram_ub_n <= '1';
-sram_lb_n <= '1';
-sram_ce_n <= '1';
-sram_we_n <= '1';
+sram_addr <= mpu_sram_address;
+sram_oe_n <= mpu_sram_oe_n;
+sram_ub_n <= mpu_sram_byte_we_n(1) and mpu_sram_oe_n;
+sram_lb_n <= mpu_sram_byte_we_n(0) and mpu_sram_oe_n;
+sram_ce_n <= '0';
+sram_we_n <= mpu_sram_byte_we_n(1) and mpu_sram_byte_we_n(0);
 
 
 --##############################################################################

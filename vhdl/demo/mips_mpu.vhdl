@@ -1,3 +1,14 @@
+--------------------------------------------------------------------------------
+-- This file was generated automatically from '/src/mips_mpu2_template.vhdl'.
+--------------------------------------------------------------------------------
+-- Synthesizable MPU -- CPU + cache + bootstrap BRAM + UART
+--
+-- This module uses the 'stub' version of the cache: a cache which actually is 
+-- only an interface between the cpu and external static memory. This is useful 
+-- to test external memory interface and cache-cpu interface without the cache
+-- functionality getting in the way.
+--------------------------------------------------------------------------------
+
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
@@ -5,192 +16,76 @@ use ieee.std_logic_unsigned.all;
 use work.mips_pkg.all;
 
 entity mips_mpu is
-    generic(
-        mult_type       : string  := "NONE"; -- {NONE|SEQUENTIAL}
-        ld_interlock    : boolean := FALSE
+    generic (
+        SRAM_ADDR_SIZE : integer := 17
     );
     port(
         clk             : in std_logic;
         reset           : in std_logic;
         interrupt       : in std_logic;
+        
+        -- interface to FPGA i/o devices
+        io_rd_data      : in std_logic_vector(31 downto 0);
+        io_rd_addr      : out std_logic_vector(31 downto 2);
+        io_wr_addr      : out std_logic_vector(31 downto 2);
+        io_wr_data      : out std_logic_vector(31 downto 0);
+        io_rd_vma       : out std_logic;
+        io_byte_we      : out std_logic_vector(3 downto 0);
+        
+        -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
+        sram_address    : out std_logic_vector(SRAM_ADDR_SIZE downto 1);
+        sram_databus    : inout std_logic_vector(15 downto 0);
+        sram_byte_we_n  : out std_logic_vector(1 downto 0);
+        sram_oe_n       : out std_logic;
 
-        rd_addr         : out std_logic_vector(31 downto 0);
-        data_r          : in std_logic_vector(31 downto 0);
-        vma_data        : out std_logic;
-        
-        wr_addr         : out std_logic_vector(31 downto 2);
-        byte_we         : out std_logic_vector(3 downto 0);
-        data_w          : out std_logic_vector(31 downto 0);
-        
+        -- UART 
         uart_rxd        : in std_logic;
-        uart_txd        : out std_logic;
-
-        mem_wait        : in std_logic
+        uart_txd        : out std_logic
     );
 end; --entity mips_mpu
 
 architecture rtl of mips_mpu is
 
--- Data RAM table and interface signals ----------------------------------------
-constant DATA_RAM_SIZE : integer := 256;
-constant DATA_ADDR_SIZE : integer := 8;
-subtype t_data_address is std_logic_vector(DATA_ADDR_SIZE-1 downto 0);
--- (this table holds one byte-slice; the RAM will have 4 of these)
-type t_data_ram is array(0 to DATA_RAM_SIZE-1) of std_logic_vector(7 downto 0);
 
-signal data_addr_rd :       t_data_address; 
-signal data_addr_wr :       t_data_address;
+signal reset_sync :         std_logic_vector(2 downto 0);
 
--- ram0 is LSB, ram3 is MSB
-signal ram3 : t_data_ram := (
-    X"63",X"69",X"74",X"3A",X"62",X"20",X"31",X"20",
-    X"32",X"38",X"67",X"76",X"69",X"20",X"34",X"00",
-    X"0A",X"6C",X"57",X"64",X"0A",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
-    );
-signal ram2 : t_data_ram := (
-    X"6F",X"6C",X"69",X"20",X"20",X"32",X"20",X"31",
-    X"39",X"0A",X"63",X"65",X"6F",X"20",X"2E",X"00",
-    X"0A",X"6C",X"6F",X"21",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
-    );
-signal ram1 : t_data_ram := (
-    X"6D",X"65",X"6D",X"46",X"20",X"30",X"2D",X"31",
-    X"3A",X"00",X"63",X"72",X"6E",X"34",X"31",X"00",
-    X"48",X"6F",X"72",X"0A",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
-    );
-signal ram0 : t_data_ram := (
-    X"70",X"20",X"65",X"65",X"32",X"31",X"2D",X"3A",
-    X"30",X"00",X"20",X"73",X"3A",X"2E",X"0A",X"00",
-    X"65",X"20",X"6C",X"0A",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
-    );
+-- interface cpu-cache
+signal cpu_data_rd_addr :   t_word;
+signal cpu_data_rd_vma :    std_logic;
+signal cpu_data_rd :        t_word;
+signal cpu_code_rd_addr :   t_pc;
+signal cpu_code_rd :        t_word;
+signal cpu_code_rd_vma :    std_logic;
+signal cpu_data_wr_addr :   t_pc;
+signal cpu_data_wr :        t_word;
+signal cpu_byte_we :        std_logic_vector(3 downto 0);
+signal cpu_mem_wait :       std_logic;
+
+-- interface to i/o
+signal mpu_io_rd_data :     std_logic_vector(31 downto 0);
+signal mpu_io_wr_data :     std_logic_vector(31 downto 0);
+signal mpu_io_rd_addr :     std_logic_vector(31 downto 2);
+signal mpu_io_wr_addr :     std_logic_vector(31 downto 2);
+signal mpu_io_rd_vma :      std_logic;
+signal mpu_io_byte_we :     std_logic_vector(3 downto 0);
+
+-- interface to UARTs
+signal data_uart :          t_word;
+signal data_uart_status :   t_word;
+signal uart_tx_rdy :        std_logic := '1';
+signal uart_rx_rdy :        std_logic := '1';
+signal uart_write_tx :      std_logic;
+signal uart_read_rx :       std_logic;
 
 
--- Code RAM table and interface signals ----------------------------------------
-constant CODE_RAM_SIZE : integer := 1024;
-constant CODE_ADDR_SIZE : integer := 10;
-subtype t_code_address is std_logic_vector(CODE_ADDR_SIZE-1 downto 0);
--- (this table holds one byte-slice; the RAM will have 4 of these)
-type t_code_ram is array(0 to CODE_RAM_SIZE-1) of std_logic_vector(7 downto 0);
+-- Block ram
+constant BRAM_SIZE : integer := 1024;
+constant BRAM_ADDR_SIZE : integer := log2(BRAM_SIZE);
 
-signal code_addr_rd :        t_code_address;
+type t_bram is array(0 to BRAM_SIZE-1) of std_logic_vector(7 downto 0);
 
--- ram0 is LSB, ram3 is MSB
-signal rom3 : t_code_ram := (
+-- bram0 is LSB, bram3 is MSB
+signal bram3 :              t_bram := (
     X"3C",X"27",X"3C",X"24",X"3C",X"24",X"3C",X"27",
     X"AC",X"00",X"14",X"24",X"0C",X"00",X"08",X"23",
     X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",
@@ -221,10 +116,10 @@ signal rom3 : t_code_ram := (
     X"00",X"24",X"24",X"AD",X"14",X"00",X"03",X"00",
     X"3C",X"8C",X"00",X"30",X"10",X"3C",X"24",X"AC",
     X"03",X"00",X"3C",X"8C",X"03",X"30",X"3C",X"8C",
-    X"00",X"30",X"10",X"3C",X"8C",X"03",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"30",X"10",X"3C",X"8C",X"03",X"00",X"63",
+    X"69",X"74",X"3A",X"62",X"20",X"31",X"20",X"31",
+    X"39",X"67",X"76",X"69",X"20",X"34",X"00",X"0A",
+    X"6C",X"57",X"64",X"0A",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -320,7 +215,7 @@ signal rom3 : t_code_ram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal rom2 : t_code_ram := (
+signal bram2 :              t_bram := (
     X"1C",X"9C",X"05",X"A5",X"04",X"84",X"1D",X"BD",
     X"A0",X"A4",X"60",X"A5",X"00",X"00",X"00",X"BD",
     X"A1",X"A2",X"A3",X"A4",X"A5",X"A6",X"A7",X"A8",
@@ -351,10 +246,10 @@ signal rom2 : t_code_ram := (
     X"00",X"C6",X"A5",X"06",X"A7",X"A4",X"E0",X"00",
     X"03",X"62",X"00",X"42",X"40",X"02",X"03",X"43",
     X"E0",X"00",X"02",X"42",X"E0",X"42",X"03",X"62",
-    X"00",X"42",X"40",X"02",X"42",X"E0",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"42",X"40",X"02",X"42",X"E0",X"00",X"6F",
+    X"6C",X"69",X"20",X"20",X"32",X"20",X"31",X"30",
+    X"0A",X"63",X"65",X"6F",X"20",X"2E",X"00",X"0A",
+    X"6C",X"6F",X"21",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -450,8 +345,8 @@ signal rom2 : t_code_ram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal rom1 : t_code_ram := (
-    X"80",X"7F",X"80",X"00",X"80",X"02",X"80",X"02",
+signal bram1 :              t_bram := (
+    X"80",X"7F",X"80",X"00",X"80",X"02",X"80",X"01",
     X"00",X"18",X"FF",X"00",X"00",X"00",X"00",X"FF",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -468,8 +363,8 @@ signal rom1 : t_code_ram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"10",X"20",X"00",X"00",
-    X"00",X"00",X"00",X"80",X"FF",X"00",X"00",X"00",
-    X"80",X"00",X"00",X"80",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"00",X"00",X"FF",X"00",X"00",X"03",
+    X"00",X"00",X"04",X"00",X"00",X"04",X"00",X"00",
     X"20",X"00",X"00",X"00",X"FF",X"20",X"00",X"00",
     X"10",X"00",X"00",X"00",X"00",X"20",X"20",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"FF",X"00",
@@ -481,10 +376,10 @@ signal rom1 : t_code_ram := (
     X"00",X"00",X"FF",X"00",X"FF",X"30",X"00",X"00",
     X"20",X"00",X"00",X"00",X"FF",X"20",X"00",X"00",
     X"00",X"00",X"20",X"00",X"00",X"00",X"20",X"00",
-    X"00",X"00",X"FF",X"20",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"FF",X"20",X"00",X"00",X"00",X"6D",
+    X"65",X"6D",X"46",X"20",X"30",X"2D",X"36",X"3A",
+    X"00",X"63",X"72",X"6E",X"34",X"31",X"00",X"48",
+    X"6F",X"72",X"0A",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -580,8 +475,8 @@ signal rom1 : t_code_ram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
-signal rom0 : t_code_ram := (
-    X"00",X"F0",X"00",X"58",X"00",X"60",X"00",X"48",
+signal bram0 :              t_bram := (
+    X"00",X"F0",X"00",X"00",X"00",X"00",X"00",X"E8",
     X"00",X"2A",X"FD",X"04",X"8B",X"00",X"0E",X"98",
     X"10",X"14",X"18",X"1C",X"20",X"24",X"28",X"2C",
     X"30",X"34",X"38",X"3C",X"40",X"44",X"48",X"4C",
@@ -598,8 +493,8 @@ signal rom0 : t_code_ram := (
     X"28",X"2C",X"08",X"00",X"00",X"04",X"08",X"0C",
     X"10",X"14",X"18",X"1C",X"20",X"24",X"28",X"2C",
     X"00",X"08",X"00",X"19",X"12",X"10",X"08",X"00",
-    X"0C",X"08",X"00",X"00",X"E8",X"14",X"A1",X"00",
-    X"00",X"A1",X"28",X"00",X"14",X"40",X"A1",X"18",
+    X"0C",X"08",X"00",X"00",X"E8",X"14",X"A1",X"DC",
+    X"00",X"A1",X"04",X"00",X"14",X"1C",X"A1",X"18",
     X"00",X"20",X"00",X"02",X"FC",X"00",X"00",X"08",
     X"21",X"00",X"00",X"11",X"0A",X"00",X"00",X"0D",
     X"0E",X"00",X"01",X"20",X"00",X"02",X"FC",X"00",
@@ -611,10 +506,10 @@ signal rom0 : t_code_ram := (
     X"00",X"57",X"FC",X"00",X"E7",X"06",X"08",X"00",
     X"00",X"20",X"00",X"02",X"FC",X"00",X"49",X"00",
     X"08",X"00",X"00",X"20",X"08",X"01",X"00",X"20",
-    X"00",X"01",X"FC",X"00",X"00",X"08",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"01",X"FC",X"00",X"00",X"08",X"00",X"70",
+    X"20",X"65",X"65",X"36",X"31",X"2D",X"3A",X"32",
+    X"00",X"20",X"73",X"3A",X"2E",X"0A",X"00",X"65",
+    X"20",X"6C",X"0A",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -711,148 +606,158 @@ signal rom0 : t_code_ram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
 
+subtype t_bram_address is std_logic_vector(BRAM_ADDR_SIZE-1 downto 0);
+
+signal bram_rd_addr :       t_bram_address; 
+signal bram_wr_addr :       t_bram_address;
+signal bram_rd_data :       t_word;
+signal bram_wr_data :       t_word;
+signal bram_byte_we :       std_logic_vector(3 downto 0);
+
+
 --------------------------------------------------------------------------------
-
-signal reset_sync :         std_logic_vector(2 downto 0);
-signal cpu_rd_addr :        std_logic_vector(31 downto 0);
-signal prev_rd_addr :       std_logic_vector(31 downto 28);
-signal cpu_vma_data :       std_logic;
-signal cpu_vma_code :       std_logic;
-signal cpu_wr_addr :        std_logic_vector(31 downto 2);
-signal cpu_byte_we :        std_logic_vector(3 downto 0);
-signal cpu_data_r :         std_logic_vector(31 downto 0);
-signal data_ram :           std_logic_vector(31 downto 0);
-signal data_uart :          std_logic_vector(31 downto 0);
-signal data_uart_status :   std_logic_vector(31 downto 0);
-signal uart_tx_rdy :        std_logic;
-signal uart_rx_rdy :        std_logic;
-signal uart_write_tx :      std_logic;
-signal uart_read_rx :       std_logic;
-signal cpu_data_w :         std_logic_vector(31 downto 0);
-signal cpu_code_addr :      std_logic_vector(31 downto 2);
-signal cpu_code_r :         std_logic_vector(31 downto 0);
-
-
 begin
 
-    cpu: entity work.mips_cpu
+cpu: entity work.mips_cpu
     port map (
         interrupt   => '0',
         
-        data_rd_addr=> cpu_rd_addr,
-        data_rd_vma => cpu_vma_data,
-        data_rd     => cpu_data_r,
+        data_rd_addr=> cpu_data_rd_addr,
+        data_rd_vma => cpu_data_rd_vma,
+        data_rd     => cpu_data_rd,
         
-        code_rd_addr=> cpu_code_addr,
-        code_rd     => cpu_code_r,
-        code_rd_vma => cpu_vma_code,
+        code_rd_addr=> cpu_code_rd_addr,
+        code_rd     => cpu_code_rd,
+        code_rd_vma => cpu_code_rd_vma,
         
-        data_wr_addr=> cpu_wr_addr,
-        data_wr     => cpu_data_w,
+        data_wr_addr=> cpu_data_wr_addr,
+        data_wr     => cpu_data_wr,
         byte_we     => cpu_byte_we,
-
-        mem_wait    => '0',
+    
+        mem_wait    => cpu_mem_wait,
         
         clk         => clk,
-        reset       => reset_sync(0)
+        reset       => reset
+    );
+
+cache: entity work.mips_cache_stub
+    generic map (
+        BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
+        SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
+    )
+    port map (
+        clk             => clk,
+        reset           => reset,
+        
+        -- Interface to CPU core
+        data_rd_addr    => cpu_data_rd_addr,
+        data_rd         => cpu_data_rd,
+        data_rd_vma     => cpu_data_rd_vma,
+                        
+        code_rd_addr    => cpu_code_rd_addr,
+        code_rd         => cpu_code_rd,
+        code_rd_vma     => cpu_code_rd_vma,
+                        
+        data_wr_addr    => cpu_data_wr_addr,
+        byte_we         => cpu_byte_we,
+        data_wr         => cpu_data_wr,
+                        
+        mem_wait        => cpu_mem_wait,
+        cache_enable    => '1',
+        
+        -- interface to FPGA i/o devices
+        io_rd_data      => mpu_io_rd_data,
+        io_wr_data      => mpu_io_wr_data,
+        io_rd_addr      => mpu_io_rd_addr,
+        io_wr_addr      => mpu_io_wr_addr,
+        io_rd_vma       => mpu_io_rd_vma,
+        io_byte_we      => mpu_io_byte_we,
+    
+        -- interface to synchronous 32-bit-wide FPGA BRAM
+        bram_rd_data    => bram_rd_data,
+        bram_wr_data    => bram_wr_data,
+        bram_rd_addr    => bram_rd_addr,
+        bram_wr_addr    => bram_wr_addr,
+        bram_byte_we    => bram_byte_we,
+        
+        -- interface to asynchronous 16-bit-wide external SRAM
+        sram_address    => sram_address,
+        sram_databus    => sram_databus,
+        sram_byte_we_n  => sram_byte_we_n,
+        sram_oe_n       => sram_oe_n
     );
 
 
-    -- RAM vs. IO data read mux
-    cpu_data_r <= data_ram when prev_rd_addr/=X"2" else data_uart;
-    
+--------------------------------------------------------------------------------
+-- BRAM interface 
 
-    -- Take the slices of the addr buses that will reach the ram blocks
-    data_addr_rd <= cpu_rd_addr(DATA_ADDR_SIZE-1+2 downto 2);
-    data_addr_wr <= cpu_wr_addr(DATA_ADDR_SIZE-1+2 downto 2);
-    code_addr_rd <= cpu_code_addr(CODE_ADDR_SIZE-1+2 downto 2);
-
-
-    data_ram_block:
-    process(clk)
-    begin
-        if clk'event and clk='1' then
-            prev_rd_addr <= cpu_rd_addr(31 downto 28);
-                
-            data_ram <= 
-                ram3(conv_integer(unsigned(data_addr_rd))) &
-                ram2(conv_integer(unsigned(data_addr_rd))) &
-                ram1(conv_integer(unsigned(data_addr_rd))) &
-                ram0(conv_integer(unsigned(data_addr_rd)));
+fpga_ram_block:
+process(clk)
+begin
+    if clk'event and clk='1' then
             
-            if cpu_byte_we/="0000" and cpu_wr_addr(31 downto 28)/=X"2" then
-                -- Write to RAM
-                if cpu_byte_we(3)='1' then
-                    ram3(conv_integer(unsigned(data_addr_wr))) <= cpu_data_w(31 downto 24);
-                end if;
-                if cpu_byte_we(2)='1' then
-                    ram2(conv_integer(unsigned(data_addr_wr))) <= cpu_data_w(23 downto 16);
-                end if;
-                if cpu_byte_we(1)='1' then
-                    ram1(conv_integer(unsigned(data_addr_wr))) <= cpu_data_w(15 downto  8);
-                end if;
-                if cpu_byte_we(0)='1' then
-                    ram0(conv_integer(unsigned(data_addr_wr))) <= cpu_data_w( 7 downto  0);
-                end if;
-            end if;
-        end if;
-    end process data_ram_block;
+        bram_rd_data <= 
+            bram3(conv_integer(unsigned(bram_rd_addr))) &
+            bram2(conv_integer(unsigned(bram_rd_addr))) &
+            bram1(conv_integer(unsigned(bram_rd_addr))) &
+            bram0(conv_integer(unsigned(bram_rd_addr)));
+        
+    end if;
+end process fpga_ram_block;
 
-    code_ram_block:
-    process(clk)
-    begin
-        if clk'event and clk='1' then
-            cpu_code_r <= 
-                rom3(conv_integer(unsigned(code_addr_rd))) &
-                rom2(conv_integer(unsigned(code_addr_rd))) &
-                rom1(conv_integer(unsigned(code_addr_rd))) &
-                rom0(conv_integer(unsigned(code_addr_rd)));
-        end if;
-    end process code_ram_block;
-
-    reset_synchronization:
-    process(clk)
-    begin
-        if clk'event and clk='1' then
-            reset_sync(2) <= reset;
-            reset_sync(1) <= reset_sync(2);
-            reset_sync(0) <= reset_sync(1);
-        end if;
-    end process reset_synchronization;
+-- FIXME this should be in parent block
+reset_synchronization:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        reset_sync(2) <= reset;
+        reset_sync(1) <= reset_sync(2);
+        reset_sync(0) <= reset_sync(1);
+    end if;
+end process reset_synchronization;
 
 --------------------------------------------------------------------------------
 
-data_w <= cpu_data_w;
-wr_addr <= cpu_wr_addr;
-vma_data <= cpu_vma_data;
 
 --------------------------------------------------------------------------------
 
-serial_rx : entity work.rs232_rx port map(
-    rxd =>      uart_rxd,
-    data_rx =>  OPEN, --rs232_data_rx,
-    rx_rdy =>   uart_rx_rdy,
-    read_rx =>  '1', --read_rx,
-    clk =>      clk,
-    reset =>    reset_sync(0)
-);
+serial_rx : entity work.rs232_rx 
+    port map(
+        rxd =>      uart_rxd,
+        data_rx =>  OPEN, --rs232_data_rx,
+        rx_rdy =>   uart_rx_rdy,
+        read_rx =>  '1', --read_rx,
+        clk =>      clk,
+        reset =>    reset_sync(0)
+    );
 
 
-uart_write_tx <= '1' when cpu_byte_we/="0000" and cpu_wr_addr(31 downto 28)=X"2" 
-                 else '0';
+uart_write_tx <= '1' 
+    when mpu_io_byte_we/="0000" and mpu_io_wr_addr(31 downto 28)=X"2" 
+    else '0';
 
-serial_tx : entity work.rs232_tx port map(
-    clk =>      clk,
-    reset =>    reset_sync(0),
-    rdy =>      uart_tx_rdy,
-    load =>     uart_write_tx,
-    data_i =>   cpu_data_w(7 downto 0),
-    txd =>      uart_txd
-);
+serial_tx : entity work.rs232_tx 
+    port map(
+        clk =>      clk,
+        reset =>    reset_sync(0),
+        rdy =>      uart_tx_rdy,
+        load =>     uart_write_tx,
+        data_i =>   mpu_io_wr_data(7 downto 0),
+        txd =>      uart_txd
+    );
 
 -- UART read registers; only status, and hardwired, for the time being
-data_uart <= data_uart_status; -- FIXEM no data rx yet
+data_uart <= data_uart_status; -- FIXME no data rx yet
 data_uart_status <= X"0000000" & "00" & uart_tx_rdy & uart_rx_rdy;
+
+mpu_io_rd_data <= data_uart;
+
+-- io_rd_data 
+io_rd_addr <= mpu_io_rd_addr;
+io_wr_addr <= mpu_io_wr_addr;
+io_wr_data <= mpu_io_wr_data;
+io_rd_vma <= mpu_io_rd_vma;
+io_byte_we <= mpu_io_byte_we;
 
 
 end architecture rtl;

@@ -21,7 +21,7 @@
 --  # External interrupts
 --
 --### Things implemented but not tested
---  # Memory pause input
+--  # Memory pause input -- not tested with a real cache
 --
 --### Things with provisional implementation
 -- 
@@ -182,8 +182,12 @@ signal load_interlock :     std_logic;
 signal stall_pipeline :     std_logic;
 -- pipeline is stalled for any reason
 signal pipeline_stalled :   std_logic;
+
+signal stalled_memwait :    std_logic;
+signal stalled_muldiv :     std_logic;
 -- pipeline is stalled because of a load instruction interlock
-signal pipeline_interlocked:std_logic;
+signal stalled_interlock :  std_logic;
+
 
 --------------------------------------------------------------------------------
 -- CP0 registers and signals
@@ -246,8 +250,8 @@ with p2_rd_mux_control select p2_data_word_rd(15 downto 8) <=
 
 -- bytes 2,3 come straight from input or are extended for LH,LHU
 with p2_ld_upper_hword select p2_data_word_rd(31 downto 16) <=
-    (others => p2_data_word_ext)    when '0',
-    data_rd(31 downto 16)            when others;
+    (others => p2_data_word_ext) when '0',
+    data_rd(31 downto 16)        when others;
 
 -- Select which data is to be written back to the reg bank and where
 p1_rbank_wr_addr <= p1_rd_num   when p2_do_load='0' and p1_link='0' else
@@ -273,6 +277,8 @@ p1_rbank_we <= '1' when (p2_do_load='1' or p1_load_alu='1' or
                         -- if the cache controller keeps the cpu stopped, do
                         -- not writeback
                         mem_wait='0' and
+                        -- if stalled because of muldiv, block writeback
+                        stalled_muldiv='0' and --@note1
                         -- on exception, abort next instruction (by preventing 
                         -- regbank writeback).
                         p2_exception='0'
@@ -285,12 +291,15 @@ synchronous_reg_bank:
 process(clk)
 begin
     if clk'event and clk='1' then
-        if p1_rbank_we='1' and 
-           (pipeline_stalled='0' or pipeline_interlocked='1') then -- @note1
+        if p1_rbank_we='1' then 
             p1_rbank(conv_integer(p1_rbank_wr_addr)) <= p1_rbank_wr_data;
         end if;
-        p1_rt_rbank <= p1_rbank(conv_integer(p0_rt_num));
-        p1_rs_rbank <= p1_rbank(conv_integer(p0_rs_num));
+        -- the rbank read port loads in the same conditions as the IR: don't
+        -- update Rs or Rt if the pipeline is frozen
+        if stall_pipeline='0' then
+            p1_rt_rbank <= p1_rbank(conv_integer(p0_rt_num));
+            p1_rs_rbank <= p1_rbank(conv_integer(p0_rs_num));
+        end if;
     end if;
 end process synchronous_reg_bank;
 
@@ -427,6 +436,7 @@ begin
     if clk'event and clk='1' then
         if reset='1' then
             -- reset to 0xffffffff so that 1st fetch addr is 0x00000000
+            -- FIXME reset vector is hardcoded
             p0_pc_reg <= (others => '1');
         else
             -- p0_pc_reg holds the same value as external sync ram addr register
@@ -810,33 +820,6 @@ end process pipeline_stage2_register_others;
 
 -- FIXME stall when needed: mem pause, mdiv pause and load interlock
 
-pipeline_stall_registers:
-process(clk)
-begin
-    if clk'event and clk='1' then
-        if reset='1' then
-            pipeline_stalled <= '0';
-            pipeline_interlocked <= '0';
-        else
-            if stall_pipeline='1' then
-                pipeline_stalled <= '1';
-            else
-                pipeline_stalled <= '0';
-            end if;
-            
-            -- stalls caused by mem_wait and load_interlock are independent and
-            -- must not overlap; so when mem_wait='1' the cache stall takes
-            -- precedence and the loa interlock must wait.
-            if mem_wait='0' then
-                if load_interlock='1' then
-                    pipeline_interlocked <= '1';
-                else
-                    pipeline_interlocked <= '0';
-                end if;
-            end if;
-        end if;
-    end if;
-end process pipeline_stall_registers;
 
 -- FIXME make sure this combinational will not have bad glitches
 stall_pipeline <= mem_wait or load_interlock or p1_muldiv_stall;
@@ -849,8 +832,47 @@ load_interlock <= '1' when
     p1_do_load='1' and      -- this is a load instruction
     pipeline_stalled='0' and -- not already stalled (i.e. assert for 1 cycle)
     (p1_rs1_hazard='1' or p1_rs2_hazard='1')
-    
     else '0';
+
+
+
+
+pipeline_stalled <= stalled_interlock or stalled_memwait or stalled_muldiv;
+
+pipeline_stall_registers:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            stalled_interlock <= '0';
+            stalled_memwait <= '0';
+            stalled_muldiv <= '0';
+        else
+            if mem_wait='1' then
+                stalled_memwait <= '1';
+            else
+                stalled_memwait <= '0';
+            end if;
+            
+            if p1_muldiv_stall='1' then
+                stalled_muldiv <= '1';
+            else
+                stalled_muldiv <= '0';
+            end if;
+            
+            -- stalls caused by mem_wait and load_interlock are independent and
+            -- must not overlap; so when mem_wait='1' the cache stall takes
+            -- precedence and the loa interlock must wait.
+            if mem_wait='0' then
+                if load_interlock='1' then
+                    stalled_interlock <= '1';
+                else
+                    stalled_interlock <= '0';
+                end if;
+            end if;
+        end if;
+    end if;
+end process pipeline_stall_registers;
 
 p1_rs1_hazard <= '1'; --'1' when p0_uses_rs1='1' and p1_rd_num=p0_rs_num else '0';
 p1_rs2_hazard <= '1'; --'1' when p0_uses_rs2='1' and p1_rd_num=p0_rt_num else '0';
@@ -976,7 +998,7 @@ end architecture rtl;
 -- @note1 : 
 --
 -- This is the meaning of these two signals:
--- pipeline_stalled & pipeline_interlocked =>
+-- pipeline_stalled & stalled_interlock =>
 --  "00" => normal state
 --  "01" => normal state (makes for easier decoding)
 --  "10" => all stages of pipeline stalled, including rbank
