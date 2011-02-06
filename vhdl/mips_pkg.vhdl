@@ -5,11 +5,12 @@ use ieee.std_logic_unsigned.all;
 
 package mips_pkg is
 
-
-subtype t_addr_decode is std_logic_vector(31 downto 16);
-constant ADDR_BOOT : t_addr_decode      := X"0000";
-constant ADDR_XRAM : t_addr_decode      := X"8000";
-constant ADDR_IO : t_addr_decode        := X"2000";
+-- FIXME this stuff belongs in the cache module where address decoding is made
+-- (besides, they should be module generics, not package constants)
+subtype t_addr_decode is std_logic_vector(31 downto 24);
+constant ADDR_BOOT : t_addr_decode      := X"00";
+constant ADDR_XRAM : t_addr_decode      := X"80";
+constant ADDR_IO : t_addr_decode        := X"20";
 
 
 subtype t_addr is std_logic_vector(31 downto 0);
@@ -58,9 +59,6 @@ constant MULT_SIGNED_DIVIDE : t_mult_function := "1110"; -- 27
 -- CAN BE USED IN SYNTHESIZABLE CODE as long as called with constant arguments
 function log2(A : natural) return natural;
 
--- Return '1' if address A is within a given memory area
--- CAN BE USED IN SYNTHESIZABLE CODE as long as called with constant arguments
-function addr_decode(A : std_logic_vector; mask : t_addr_decode) return std_logic;
 
 end package;
 
@@ -75,14 +73,5 @@ begin
     end loop;
     return(30);
 end function log2;
-
-function addr_decode(A : std_logic_vector; mask : t_addr_decode) return std_logic is
-begin
-    if A(mask'high downto mask'low) = mask then
-        return '1';
-    else
-        return '0';
-    end if;
-end function addr_decode;
 
 end package body;
