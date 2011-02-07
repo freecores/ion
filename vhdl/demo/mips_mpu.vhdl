@@ -46,9 +46,6 @@ end; --entity mips_mpu
 
 architecture rtl of mips_mpu is
 
-
-signal reset_sync :         std_logic_vector(2 downto 0);
-
 -- interface cpu-cache
 signal cpu_data_rd_addr :   t_word;
 signal cpu_data_rd_vma :    std_logic;
@@ -154,9 +151,9 @@ signal bram :               t_bram := (
     X"03E00008",X"30420001",X"3C032000",X"8C620020",
     X"00000000",X"30420001",X"1040FFFC",X"3C022000",
     X"8C420000",X"03E00008",X"00000000",X"636F6D70",
-    X"696C6520",X"74696D65",X"3A204665",X"62202036",
-    X"20323031",X"31202D2D",X"2032303A",X"31373A33",
-    X"360A0000",X"67636320",X"76657273",X"696F6E3A",
+    X"696C6520",X"74696D65",X"3A204665",X"62202037",
+    X"20323031",X"31202D2D",X"2030383A",X"33383A34",
+    X"390A0000",X"67636320",X"76657273",X"696F6E3A",
     X"2020342E",X"342E310A",X"00000000",X"0A0A4865",
     X"6C6C6F20",X"576F726C",X"64210A0A",X"0A000000",
     X"00000000",X"00000000",X"00000000",X"00000000",
@@ -450,16 +447,6 @@ begin
     end if;
 end process fpga_ram_block;
 
--- FIXME this should be in parent block
-reset_synchronization:
-process(clk)
-begin
-    if clk'event and clk='1' then
-        reset_sync(2) <= reset;
-        reset_sync(1) <= reset_sync(2);
-        reset_sync(0) <= reset_sync(1);
-    end if;
-end process reset_synchronization;
 
 --------------------------------------------------------------------------------
 
@@ -473,7 +460,7 @@ serial_rx : entity work.rs232_rx
         rx_rdy =>   uart_rx_rdy,
         read_rx =>  '1', --read_rx,
         clk =>      clk,
-        reset =>    reset_sync(0)
+        reset =>    reset
     );
 
 
@@ -484,7 +471,7 @@ uart_write_tx <= '1'
 serial_tx : entity work.rs232_tx 
     port map(
         clk =>      clk,
-        reset =>    reset_sync(0),
+        reset =>    reset,
         rdy =>      uart_tx_rdy,
         load =>     uart_write_tx,
         data_i =>   mpu_io_wr_data(7 downto 0),

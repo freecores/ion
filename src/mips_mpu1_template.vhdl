@@ -46,9 +46,6 @@ end; --entity mips_mpu
 
 architecture rtl of mips_mpu is
 
-
-signal reset_sync :         std_logic_vector(2 downto 0);
-
 -- interface cpu-cache
 signal cpu_data_rd_addr :   t_word;
 signal cpu_data_rd_vma :    std_logic;
@@ -193,16 +190,6 @@ begin
     end if;
 end process fpga_ram_block;
 
--- FIXME this should be in parent block
-reset_synchronization:
-process(clk)
-begin
-    if clk'event and clk='1' then
-        reset_sync(2) <= reset;
-        reset_sync(1) <= reset_sync(2);
-        reset_sync(0) <= reset_sync(1);
-    end if;
-end process reset_synchronization;
 
 --------------------------------------------------------------------------------
 
@@ -216,7 +203,7 @@ serial_rx : entity work.rs232_rx
         rx_rdy =>   uart_rx_rdy,
         read_rx =>  '1', --read_rx,
         clk =>      clk,
-        reset =>    reset_sync(0)
+        reset =>    reset
     );
 
 
@@ -227,7 +214,7 @@ uart_write_tx <= '1'
 serial_tx : entity work.rs232_tx 
     port map(
         clk =>      clk,
-        reset =>    reset_sync(0),
+        reset =>    reset,
         rdy =>      uart_tx_rdy,
         load =>     uart_write_tx,
         data_i =>   mpu_io_wr_data(7 downto 0),

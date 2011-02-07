@@ -12,7 +12,7 @@ use ieee.std_logic_unsigned.all;
 -- FPGA i/o for Terasic DE-1 board
 -- (Many of the board's i/o devices will go unused in this demo)
 entity c2sb_demo is
-    port ( 
+    port (
         -- ***** Clocks
         clk_50MHz     : in std_logic;
 
@@ -28,9 +28,9 @@ entity c2sb_demo is
         sram_data     : inout std_logic_vector(15 downto 0);
         sram_oe_n     : out std_logic;
         sram_ub_n     : out std_logic;
-        sram_lb_n     : out std_logic;        
+        sram_lb_n     : out std_logic;
         sram_ce_n     : out std_logic;
-        sram_we_n     : out std_logic;        
+        sram_we_n     : out std_logic;
 
         -- ***** RS-232
         rxd           : in std_logic;
@@ -54,7 +54,7 @@ entity c2sb_demo is
         sd_data       : in  std_logic;
         sd_cs         : out std_logic;
         sd_cmd        : out std_logic;
-        sd_clk        : out std_logic           
+        sd_clk        : out std_logic
     );
 end c2sb_demo;
 
@@ -62,7 +62,7 @@ architecture minimal of c2sb_demo is
 
 
 --##############################################################################
--- 
+--
 
 constant SRAM_ADDR_SIZE : integer := 18;
 
@@ -80,10 +80,10 @@ signal write_tx :           std_logic;
 
 
 --##############################################################################
--- 
+--
 
 
--- CPU access to hex display (unused by Altair SW)
+-- CPU access to hex display
 signal reg_display :        std_logic_vector(15 downto 0);
 
 
@@ -91,18 +91,12 @@ signal reg_display :        std_logic_vector(15 downto 0);
 --##############################################################################
 -- DE-1 board interface signals
 
+-- Synchronization FF chain for asynchronous reset input
+signal reset_sync :         std_logic_vector(2 downto 0);
+
 -- Quad 7-segment display (non multiplexed) & LEDS
 signal display_data :       std_logic_vector(15 downto 0);
-signal reg_gleds :          std_logic_vector(7 downto 0);  
-
--- i/o signals
-signal data_io_in :         std_logic_vector(7 downto 0);
-signal data_mem_in :        std_logic_vector(7 downto 0);
-signal data_rom_in :        std_logic_vector(7 downto 0);
-signal rom_access :         std_logic;
-signal rom_space :          std_logic;
-signal breakpoint :         std_logic;
-
+signal reg_gleds :          std_logic_vector(7 downto 0);
 
 -- Clock & reset signals
 signal clk_1hz :            std_logic;
@@ -135,6 +129,31 @@ signal mpu_sram_databus :   std_logic_vector(15 downto 0);
 signal mpu_sram_byte_we_n : std_logic_vector(1 downto 0);
 signal mpu_sram_oe_n :      std_logic;
 
+-- Converts hex nibble to 7-segment
+-- Segments ordered as "GFEDCBA"; '0' is ON, '1' is OFF
+function nibble_to_7seg(nibble : std_logic_vector(3 downto 0))
+                        return std_logic_vector is
+begin
+    case nibble is
+    when X"0"       => return "0000001";
+    when X"1"       => return "1001111";
+    when X"2"       => return "0010010";
+    when X"3"       => return "0000110";
+    when X"4"       => return "1001100";
+    when X"5"       => return "0100100";
+    when X"6"       => return "0100000";
+    when X"7"       => return "0001111";
+    when X"8"       => return "0000000";
+    when X"9"       => return "0000100";
+    when X"a"       => return "0001000";
+    when X"b"       => return "1100000";
+    when X"c"       => return "0110001";
+    when X"d"       => return "1000010";
+    when X"e"       => return "0110000";
+    when X"f"       => return "0111000";
+    when others     => return "0111111"; -- can't happen
+    end case;
+end function nibble_to_7seg;
 
 
 begin
@@ -145,7 +164,7 @@ begin
     )
     port map (
         interrupt   => '0',
-        
+
         -- interface to FPGA i/o devices
         io_rd_data  => io_rd_data,
         io_rd_addr  => io_rd_addr,
@@ -153,17 +172,17 @@ begin
         io_wr_data  => io_wr_data,
         io_rd_vma   => io_rd_vma,
         io_byte_we  => io_byte_we,
-        
+
         -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
         sram_address    => mpu_sram_address,
         sram_databus    => sram_data,
         sram_byte_we_n  => mpu_sram_byte_we_n,
         sram_oe_n       => mpu_sram_oe_n,
 
-        
+
         uart_rxd    => rxd,
         uart_txd    => txd,
-        
+
         clk         => clk,
         reset       => reset
     );
@@ -172,7 +191,7 @@ begin
 reg_display <= io_wr_data(15 downto 0);
 reg_gleds <= io_rd_vma & "000" & io_byte_we;
 
--- red leds (light with '1') -- some CPU control signals 
+-- red leds (light with '1') -- some CPU control signals
 red_leds(0) <= '0';
 red_leds(1) <= '0';
 red_leds(2) <= '0';
@@ -218,7 +237,17 @@ sram_we_n <= mpu_sram_byte_we_n(1) and mpu_sram_byte_we_n(0);
 --##############################################################################
 
 -- Use button 3 as reset
-reset <= not buttons(3);
+reset_synchronization:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        reset_sync(2) <= not buttons(3);
+        reset_sync(1) <= reset_sync(2);
+        reset_sync(0) <= reset_sync(1);
+    end if;
+end process reset_synchronization;
+
+reset <= reset_sync(0);
 
 
 -- Generate a 1-Hz 'clock' to flash a LED for visual reference.
@@ -248,47 +277,28 @@ clk <= clk_50MHz;
 --##############################################################################
 
 -- Display the contents of a debug register at the green leds bar
-green_leds <= reg_gleds; 
+green_leds <= reg_gleds;
 
 
 --##############################################################################
 -- QUAD 7-SEGMENT DISPLAYS
 --##############################################################################
 
--- So far, nothing to display
+-- Show contents of debug register in hex display
 display_data <= reg_display;
-  
+
 
 -- 7-segment encoders; the dev board displays are not multiplexed or encoded
-with display_data(15 downto 12) select hex3 <=  
-"0000001" when X"0","1001111" when X"1","0010010" when X"2","0000110" when X"3",
-"1001100" when X"4","0100100" when X"5","0100000" when X"6","0001111" when X"7",
-"0000000" when X"8","0000100" when X"9","0001000" when X"a","1100000" when X"b",
-"0110001" when X"c","1000010" when X"d","0110000" when X"e","0111000" when others;          
-          
-with display_data(11 downto 8) select hex2 <= 
-"0000001" when X"0","1001111" when X"1","0010010" when X"2","0000110" when X"3",
-"1001100" when X"4","0100100" when X"5","0100000" when X"6","0001111" when X"7",
-"0000000" when X"8","0000100" when X"9","0001000" when X"a","1100000" when X"b",
-"0110001" when X"c","1000010" when X"d","0110000" when X"e","0111000" when others;          
-          
-with display_data(7 downto 4) select hex1 <=  
-"0000001" when X"0","1001111" when X"1","0010010" when X"2","0000110" when X"3",
-"1001100" when X"4","0100100" when X"5","0100000" when X"6","0001111" when X"7",
-"0000000" when X"8","0000100" when X"9","0001000" when X"a","1100000" when X"b",
-"0110001" when X"c","1000010" when X"d","0110000" when X"e","0111000" when others;
-
-with display_data(3 downto 0) select hex0 <=  
-"0000001" when X"0","1001111" when X"1","0010010" when X"2","0000110" when X"3",
-"1001100" when X"4","0100100" when X"5","0100000" when X"6","0001111" when X"7",
-"0000000" when X"8","0000100" when X"9","0001000" when X"a","1100000" when X"b",
-"0110001" when X"c","1000010" when X"d","0110000" when X"e","0111000" when others;
+hex3 <= nibble_to_7seg(display_data(15 downto 12));
+hex2 <= nibble_to_7seg(display_data(11 downto  8));
+hex1 <= nibble_to_7seg(display_data( 7 downto  4));
+hex0 <= nibble_to_7seg(display_data( 3 downto  0));
 
 --##############################################################################
 -- SD card interface
 --##############################################################################
 
--- unused in this demo, but I did not bother to cut away the attached registers
+-- unused in this demo
 sd_cs     <= '0';
 sd_cmd    <= '0';
 sd_clk    <= '0';
