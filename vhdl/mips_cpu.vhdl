@@ -21,7 +21,7 @@
 --  # External interrupts
 --
 --### Things implemented but not tested
---  # Memory pause input -- not tested with a real cache
+--  # Memory pause input -- only tested with stub cache
 --
 --### Things with provisional implementation
 -- 
@@ -40,7 +40,12 @@ use work.mips_pkg.all;
 
 entity mips_cpu is
     generic(
-        XILINX_REGBANK  : string  := "distributed" -- {distributed|block}
+        -- Reset vector address minus 4
+        RESET_VECTOR_M4 : t_word    := RESET_VECTOR_M4;
+        -- Trap vector address
+        TRAP_VECTOR : t_word        := TRAP_VECTOR;
+        -- Type of memory to be used for register bank in xilinx HW
+        XILINX_REGBANK  : string    := "distributed" -- {distributed|block}
     );
     port(
         clk             : in std_logic;
@@ -435,9 +440,8 @@ process(clk)
 begin
     if clk'event and clk='1' then
         if reset='1' then
-            -- reset to 0xffffffff so that 1st fetch addr is 0x00000000
-            -- FIXME reset vector is hardcoded
-            p0_pc_reg <= (others => '1');
+            -- reset to <vector>-4 so that 1st fetch addr is <vector>
+            p0_pc_reg <= RESET_VECTOR_M4(31 downto 2);
         else
             -- p0_pc_reg holds the same value as external sync ram addr register
             p0_pc_reg <= p0_pc_next;
@@ -479,9 +483,10 @@ p1_branch_offset <= p1_branch_offset_sex & p1_ir_reg(15 downto 0);
 p0_pc_branch <= p0_pc_reg + p1_branch_offset;
 
 -- decide which jump target is to be used
-p0_pc_target <= X"0000003"&"11"     when p1_exception='1' else 
-             p0_pc_jump             when p1_jump_type(0)='1' else 
-             p0_pc_branch;
+p0_pc_target <=
+    TRAP_VECTOR(31 downto 2)    when p1_exception='1' else 
+    p0_pc_jump                  when p1_jump_type(0)='1' else 
+    p0_pc_branch;
 
 
 --##############################################################################
@@ -959,7 +964,7 @@ begin
                 -- FIXME check for CP0 reg index
                 cp0_status <= p1_rs(cp0_status'high downto 0);
             end if;
-            if p1_exception='1' then
+            if p1_exception='1' and pipeline_stalled='0' then
                 cp0_epc <= p0_pc_restart;
                 
                 if p1_unknown_opcode='1' then
