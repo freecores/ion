@@ -1,6 +1,7 @@
 --##############################################################################
 -- This file was generated automatically from '/src/mips_tb0_template.vhdl'.
 -- 
+-- WARNING: As of rev. 55 this module is obsolete and has been left behind
 --------------------------------------------------------------------------------
 -- Simulation test bench TB0 -- not synthesizable.
 --

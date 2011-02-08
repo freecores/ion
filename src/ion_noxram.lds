@@ -1,6 +1,8 @@
 /**
 * ion_noxram.lds -- Linker script file for ION project (with no RAM or cache)
 *
+* WARNING: This script is no longer used by any makefile, to be removed.
+*
 * The ion cpu has separate buses for code and data (Harvard architecture) but
 * does not have caches by default. This linker script targets that 'bare' 
 * system configuration. It is meant for early testing and debugging.
@@ -20,6 +22,33 @@
 * FIXME code and data RAM block sizes hardcoded
 * FIXME code and data start addresses hardcoded
 */
+/*
+# Known problems:
+#
+# 1.- LINK PROBLEM IF FLAG '-G0' NOT USED
+#       If flag '-G0' is not used on gcc, linker fails with 'relocation 
+#       truncated to fit: R_MIPS_GPREL16' error message.
+#       This only happens when you use global or static veriables, initialized 
+#       or not.
+#       (See explaination in the project docs about $gp indexed addressing in
+#       MIPS architectures and the -G0 flag).
+#
+#     SUSPECTED CAUSE:
+#       I'm sure there is something wrong with my linker script.
+#       With the default link scripts this does not happen. Yet we need to use
+#       a script so that we can split code and data (including read-only) to
+#       different sections (and later to different ram blocks).
+#       
+#     WORKAROUND: 
+#       Use -G0 flag so that _gp indexing is disabled. There is a performance
+#       hit, though. In effect we're telling the compiler to NOT use $gp for
+#       indexed access to any global variables.
+#       This is only necessary for the 'bare' target (no external ram and no
+#       cache) and will have to be fixed for regular targets (by using a 
+#       standard link script or fixing mine).
+
+*/
+
 
 /* Make sure the first linked file is ths startup code from boot.s */
 /* (We might put boot.o in the ld command line, BEFORE all other files) */
