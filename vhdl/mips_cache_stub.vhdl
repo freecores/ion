@@ -230,9 +230,13 @@ signal data_wr_addr_mask :  t_addr_decode;
 -- 01 -> SRAM
 -- 10 -> IO
 -- 11 -> Unmapped
-signal code_rd_area :       std_logic_vector(1 downto 0);
-signal data_rd_area :       std_logic_vector(1 downto 0);
-signal data_wr_area :       std_logic_vector(1 downto 0);
+
+signal code_rd_attr :       t_range_attr;
+signal data_rd_attr :       t_range_attr;
+signal data_wr_attr :       t_range_attr;
+signal code_rd_type :       t_memory_type;
+signal data_rd_type :       t_memory_type;
+signal data_wr_type :       t_memory_type;
 
 
 
@@ -255,13 +259,14 @@ begin
     end if;
 end process cache_state_machine_regs;
 
--- The code state machine occasionally 'waits' for the 
+-- (The code state machine occasionally 'waits' for the D-cache)
 code_state_machine_transitions:
-process(cps, dps, code_rd_vma, code_miss, code_rd_area, 
+process(cps, dps, code_rd_vma, code_miss, code_rd_type, 
         write_pending, read_pending)
 begin
     case cps is
     when code_normal =>
+        -- FIXME wrong logic, these signals are not active in the same cycle
         if code_rd_vma='1' and code_miss='1' and 
            read_pending='0' and write_pending='0' then
             cns <= code_refill_bram_0; -- FIXME check memory area, SRAM!
@@ -307,24 +312,24 @@ end process code_state_machine_transitions;
 -- This state machine does not overlap IO/BRAM/SRAM accesses for simplicity.
 
 data_state_machine_transitions:
-process(dps, write_pending, read_pending, data_rd_area, data_wr_area)
+process(dps, write_pending, read_pending, data_rd_type, data_wr_type)
 begin
     case dps is
     when data_normal =>
         if write_pending='1' then
-            case data_wr_area is
-            when "00"   => dns <= data_ignore_write; -- Write to BRAM ignored
-            when "01"   => dns <= data_writethrough_sram_0;
-            when "10"   => dns <= data_write_io_0;
-            when others => dns <= dps; -- Write to undecoded area ignored
+            case data_wr_type is
+            when MT_BRAM        => dns <= data_ignore_write;
+            when MT_SRAM_16B    => dns <= data_writethrough_sram_0;
+            when MT_IO_SYNC     => dns <= data_write_io_0;
+            when others         => dns <= dps; -- ignore write to undecoded area
             end case;
             
         elsif read_pending='1' then
-            case data_rd_area is
-            when "00"   => dns <= data_refill_bram_0;
-            when "01"   => dns <= data_refill_sram_0;
-            when "10"   => dns <= data_read_io_0;
-            when others => dns <= dps; -- ignore read from undecoded area
+            case data_rd_type is
+            when MT_BRAM        => dns <= data_refill_bram_0;
+            when MT_SRAM_16B    => dns <= data_refill_sram_0;
+            when MT_IO_SYNC     => dns <= data_read_io_0;
+            when others         => dns <= dps; -- ignore read from undec. area
                            -- FIXME should raise debug flag 
             end case;
         else
@@ -445,21 +450,31 @@ data_rd_addr_mask <= data_rd_addr_reg(31 downto t_addr_decode'low);
 data_wr_addr_mask <= data_wr_addr_reg(31 downto t_addr_decode'low);
 
 
-with code_rd_addr_mask select code_rd_area <=
-    "00"    when ADDR_BOOT,
-    "01"    when ADDR_XRAM,
-    "11"    when others;
+code_rd_attr <= decode_addr(code_rd_addr_mask);
+code_rd_type <= code_rd_attr(6 downto 4);
 
-with data_rd_addr_mask select data_rd_area <=
-    "00"    when ADDR_BOOT,
-    "01"    when ADDR_XRAM,
-    "10"    when ADDR_IO,
-    "11"    when others;
+data_rd_attr <= decode_addr(data_rd_addr_mask);
+data_rd_type <= data_rd_attr(6 downto 4);
 
-with data_wr_addr_mask select data_wr_area <=
-    "01"    when ADDR_XRAM,
-    "10"    when ADDR_IO,
-    "11"    when others;
+data_wr_attr <= decode_addr(data_wr_addr_mask);
+data_wr_type <= data_wr_attr(6 downto 4);
+
+
+--with code_rd_addr_mask select code_rd_type <=
+--    "000"   when ADDR_BOOT,
+--    "001"   when ADDR_XRAM,
+--    "011"   when others;
+--
+--with data_rd_addr_mask select data_rd_type <=
+--    "000"   when ADDR_BOOT,
+--    "001"   when ADDR_XRAM,
+--    "010"   when ADDR_IO,
+--    "011"   when others;
+--
+--with data_wr_addr_mask select data_wr_type <=
+--    "001"   when ADDR_XRAM,
+--    "010"   when ADDR_IO,
+--    "011"   when others;
 
 --------------------------------------------------------------------------------
 -- BRAM interface
