@@ -4,7 +4,7 @@ mostly usage instructions for the test samples and custom utilities.
 In its present state it' more a reminder to myself than a proper explaination of
 the system.
 
-Last modified: Feb/06/2011
+Last modified: Feb/08/2011
 
 Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
@@ -54,8 +54,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     4.- Interface to external SRAM on 16-bit data bus.
 
 
-    Many of the above goals have already been accomplished but don't hold
-    your breath.
+    Many of the above goals have already been accomplished.
 
 
 
@@ -67,6 +66,14 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     'Basic' means that the core has a number of limitations that prevent it from
     running just any code -- mostly unimplemented instructions and skeletal
     memory interface.
+    
+    Besides, the core can already access external static SRAM on a 16-bit bus, 
+    as the one present in the DE-1 board, with no wait states yet (the DE-1
+    SRAM happens not to need them and that's why they're still unimplemented).
+    Code sample 'memtest' takes advantage of this to do a basic test of the
+    external SRAM.
+    
+    
     The opcode test is included in '/src/opcodes/opcodes.s' (see section 6).
 
 
@@ -116,8 +123,8 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     * Implement efficient load interlock detection with no wasted cycles.
     * Add a couple other code samples, including one with FP arithmetic.
-    * Add a simple mini-bootloader that can load programs onto external RAM 
-      from an SD card -- a very simple assembly program that can fit in 4KB.
+    * Add support for slow static memory (i.e. FLASH) so bigger programs can 
+      be run without wasting internal BRAM.
 
     
 
@@ -593,9 +600,12 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     There are a few simulation test bench templates in the /src directory, which 
     are used by all the code samples (and there's just two code samples in this 
     release of the project...). 
-    The template in file '/src/mips_tb*_template.vhdl' is filled in with all 
+    The onl one actually useful is '/src/mips_tb2_template.vhdl'. The others
+    are remnants of previous versions that will be removed ASAP.
+    
+    The template in file '/src/mips_tb2_template.vhdl' is filled in with all 
     the necesary data (mostly memory init. strings) from the
-    code sample object file(s) and then written to '/vhdl/tb/mips_tb*.vhdl'.
+    code sample object file(s) and then written to '/vhdl/tb/mips_tb2.vhdl'.
     The idea is that these tb templates are an execution harness to be shared by 
     all test programs. See the template comments for a quick explaination of
     their purpose (and the reason there is more than one template).
@@ -604,29 +614,23 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     execution and basic core functionality. As the project moves forward and
     new features are added (e.g. caches) I will add more test bench templates.
 
-    There's a particular template ('/src/mips_tb0_template.vhdl') that is only
-    used with the opcode test. It's simpler than the other templates and has all
-    three CPU buses connected to the same RAM. Unlike the others, this does not
-    resemble the way a real synthesizable system will work, so it is only used
-    for the most basic of tests (opcode operation).
-
 
 3.1.- Running the simulation
 
-    A simulation script can be found at '/sim/mips_tb1.do'. This script will
-    simulate test bench file '/vhdl/tb/mips_tb1.vhdl'.
-    A second script '/sim/mips_tb2.do' would use file '/vhdl/tb/mips_tb2.vhdl'
-    and so on -- please see the source sample makefiles.
+    A simulation script can be found at '/sim/mips_tb2.do'. This script will
+    simulate test bench file '/vhdl/tb/mips_tb2.vhdl'. 
+    The idea is that script 'mips_tb<i>.do' will run file 
+    '/vhdl/tb/mips_tb<i>.vhdl', though there's only one right now -- please 
+    see the source sample makefiles.
     
-    As of revision 53, you should use tb1 for the opcode test and tb2 for all 
-    other code samples.
+    As of revision 70, you should use mips_tb2 for all code samples.
 
     The test bench file is automatically generated for each of the sample
     programs (because it contains initialized memories with the program object
     code, etc.). This is automatically done by the sample code makefile,
     assuming you have a MIPS cross-toolchain in your computer (see section 6).
 
-    For convenience, a pre-generated mips_tb1.vhdl is included so you can launch
+    For convenience, a pre-generated mips_tb2.vhdl is included so you can launch
     a simulation without having to install toolchains, etc. The code is that
     of the 'hello world' sample.
 
@@ -638,12 +642,12 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         This will compile the program sources, build the necessary binary object
         files and then create a vhdl simulation test bench with memories
         initialized with the object code. The simulation test bench is created
-        as '/vhdl/tb/sim_tb1.vhdl'. You can change that by editing the makefile.
+        as '/vhdl/tb/sim_tb2.vhdl'. You can change that by editing the makefile.
         Read the makefile and comments in the python script '/src/bin2hdl.py'
         for details.
 
         ALTERNATIVELY, if you don't have a toolchain you can just skip this
-        step and use the default 'mips_tb1.vhdl' file provided.
+        step and use the default 'mips_tb2.vhdl' file provided.
 
     2.- In modelsim, change directory to /syn (menu file->change directory)
         Modelsim will create its stuff in this directory. This includes the
@@ -651,7 +655,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         (You could use any other directory, this is just a convenient place to
         put modelsim data out of the way. Just remember where the log file is.).
 
-    3.- Run script '/sim/mips_tb1.do' (menu tools->tcl->execute macro)
+    3.- Run script '/sim/mips_tb2.do' (menu tools->tcl->execute macro)
         The simulation will run to completion. In Modelsim's transcript window
         you will see the program console output, in this case a 'hello world'
         message.
@@ -970,19 +974,41 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     in the same address spaces, so it's really a Modified Harvard with separate
     storage) -- See section 2.1 about the buses.
 
-    It loads a 'code' binary file at address 0x0 and a 'data' binary file at
-    0x80000000 (configurable at compile time) and then starts execution at 0x0.
-    
-    Code meant for template tb1 uses a linker script that makes sure all the 
-    data is linked with the proper addresses and ends up in the data binary 
-    file, including read-only data that would normally be bundled with code 
-    (see section 2.1).
+    The simulator can be compiled for compatibility to Plasma or to a more
+    standard mips1. This affects the simulated memory map and the trap vectors
+    only, as of rev. 70. Note that mips1 simulation is far from complete yet.
 
+    Upon startup, the simulator loads a number of binary files as requested in 
+    the command line:
+    
+    --bram=<filename>    : file to be loaded in simulated FPGA block RAM
+    --xram=<filename>    : file to be loaded in simulated external RAM
+    --flash=<filename>   : file to be loaded in simulated flash area
+
+    For the basic code samples provided, you want to load the code binary on
+    the BRAM and the data binary, even if empty, on the XRAM (note that a real
+    XRAM is out of the FPGA and thus we can't initialize them 'in logic', we'd 
+    have to do it from the start-up SW, which ours doesn't).
+
+    The addresses and attributes (read only, etc.) of the memory blocks are
+    hardcoded (though they are parametrizable, see the source) and reflect
+    the actual memory map of the target system as defined in mips_pkg.vhdl.
+
+    After loading the binary files, a reset is performed and execution starts
+    at 0x00000000 (if compiled for Plasma compatibility) or 0xbfc00000 (if
+    compiled for mips1 compatibility).
+    
+    If you want to simulate a Plasma, you need to compile the code with 
+    macro SIMULATE_PLASMA defined, *and* you have to use command line 
+    parameter '--plasma'. This makes my life a bit easier.
+    
+    Simulation of plasma is meant as legacy only; the system will steadily move
+    away from compatibility with Plasma but since the simulator started as a
+    Plasma-only simulator, I though it may come in handy later to retain
+    that capability.
+    
     Many system parameters are hardcoded, including the log file name, the
     simulated memory sizes and the code and data addresses.
-    The only arguments it takes are the binary code and data files:
-
-    slite.exe <code binary file> <data binary file>
 
     The files are assumed to be plain binary chunks of big-endian data that are
     passed directly to the simulated cpu.
@@ -1051,8 +1077,7 @@ synthesizable demo.
 
 Target '*_sim' (e.g. 'hello_sim') will build the simulation test bench as vhdl
 file '/vhdl/tb/mips_tb2.vhdl'. This is the default test bench expected by the
-simulation script '/sim/mips_tb2.do'. Sample 'opcodes' is special in this
-regard, it will use mips_tb1 and should be run with '/sim/mips_tb1.do'.
+simulation script '/sim/mips_tb2.do'.
 
 The two test benches differ in the memory structure they simulate, please read
 the sources (preferably the templates, which will be uncluttered with object 
