@@ -6,18 +6,24 @@ include ..\\common\\makefile
 	
 # We'll run the simulation for long enough to complete the test
 SIM_LENGTH = 20000
-# We'll give the program some more space than by defaut
-CODE_BRAM_SIZE = 2048
-# This XRAM size is used in simulation only
-XRAM_SIZE = 1024
 
+# FPGA Block RAM parameters
+BRAM_START = 0xbfc00000
+CODE_BRAM_SIZE = 2048
+# External RAM parameters (size in words)
+XRAM_SIZE = 1024
+XRAM_START = 0x00000000	
+
+
+LFLAGS = -Ttext $(BRAM_START) -Tdata $(XRAM_START) -eentry -I elf32-big
+	
 	
 clean:
 	-$(RM) *.o *.obj *.map *.lst *.hex *.exe *.axf *.code *.data
 
 memtest:
-	$(AS_MIPS) -o memtest.o memtest.s
-	$(LD_MIPS) -Ttext 0 -eentry -Map memtest.map -s -N -o memtest.axf memtest.o
+	$(AS_MIPS) -defsym XRAM_BASE=$(XRAM_START) -o memtest.o memtest.s
+	$(LD_MIPS) $(LFLAGS) -Map memtest.map -s -N -o memtest.axf memtest.o
 	-@$(DUMP_MIPS) -I elf32-big --disassemble memtest.axf > memtest.lst
 # Dump code and data to separate binaries (data binary will be empty but TB2 needs it)
 	$(COPY_MIPS) -I elf32-big -j .text -j .rodata -O binary memtest.axf memtest.code

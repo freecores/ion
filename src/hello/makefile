@@ -5,6 +5,16 @@ include ../common/makefile
 # We'll run the simulation for 2000 clock cycles
 SIM_LENGTH = 20000
 	
+# FPGA Block RAM parameters
+BRAM_START = 0xbfc00000
+CODE_BRAM_SIZE = 2048
+# External RAM parameters (size in words)
+XRAM_SIZE = 1024
+XRAM_START = 0x00000000	
+	
+	
+LFLAGS = -Ttext $(BRAM_START) -Tdata $(XRAM_START) -eentry -I elf32-big	
+	
 clean:
 	-$(RM) *.o *.obj *.map *.lst *.hex *.exe *.axf *.code *.data
 
@@ -12,12 +22,11 @@ hello:
 	$(AS_MIPS) -o boot.o $(SRC_DIR)/common/boot.s
 	$(GCC_MIPS) -o no_os.o $(SRC_DIR)/common/no_os.c
 	$(GCC_MIPS) -o hello.o hello.c
-	$(LD_MIPS) $(LFLAGS_BOOT) -Map hello.map -s -N -o hello.axf boot.o hello.o no_os.o 
+	$(LD_MIPS) $(LFLAGS) -Map hello.map -s -N -o hello.axf boot.o hello.o no_os.o 
 	-@$(DUMP_MIPS) -m mips --disassemble hello.axf > hello.lst
-# Extract object code to be placed in code space (see link script)
+# Extract object code to be placed in code space
 	$(COPY_MIPS) -I elf32-big -O binary hello.axf hello.code
-#	$(COPY_MIPS) -I elf32-big -j.text -O binary hello.axf hello.code
-# Extract object code to be placed in data space (see link script)
+# Extract object code to be placed in data space
 	$(COPY_MIPS) -I elf32-big -j.data -j.bss -O binary hello.axf hello.data
 	
 

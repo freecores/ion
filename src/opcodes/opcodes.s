@@ -55,7 +55,9 @@ entry:
 
 
     # Trap handler address 
-    .org    0x3c
+    #.org    0x3c
+    .org    0x0180
+    
     # We have three trap sources: syscall, break and unimplemented opcode
     # Plus we have to account for a faulty cause code; that's 4 causes
     # Besides, we have to look out for the branch delay flag (BD)
@@ -1100,7 +1102,7 @@ MoveTest:
     #d: MTLO
     ori     $2,$0,'d'
     sb      $2,0($20)
-    ori     $2,$0,65
+    ori     $2,$0,66   # use 'B' instead of 'A' to cach change in HI and LO
     mtlo    $2
     mflo    $3
     sb      $3,0($20)

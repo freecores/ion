@@ -5,35 +5,16 @@
 #-------------------------------------------------------------------------------
 # SYSTEM PARAMETERS
 #
-# You can define here the size and address of the memory blocks of the system,
-# though you can't change the number and type of blocks here (see 
-# /vhdl/mips_cache_*.vhdl).
-# Addresses are duplicated in the linker script (ion*.lds).
+# You can define here the default size and address of the memory blocks of the 
+# system as seen by the linker, though you can't change the number and type of 
+# blocks here (see /vhdl/mips_cache_*.vhdl and /vhdl/mips_pkg.vhdl).
+#
+# The samples' makefiles will probably redefine the values, anyway.
 #
 #-------------------------------------------------------------------------------
-# KNOWN PROBLEMS AND WORKAROUNDS
-#
-# 1.- LINK PROBLEM IF FLAG '-G0' NOT USED
-#       If flag '-G0' is not used on gcc, linker fails with 'relocation 
-#       truncated to fit: R_MIPS_GPREL16' error message.
-#       This only happens when you use global or static veriables, initialized 
-#       or not.
-#       (See explaination in the project docs about $gp indexed addressing in
-#       MIPS architectures and the -G0 flag).
-#
-#     SUSPECTED CAUSE:
-#       I'm sure there is something wrong with my linker script.
-#       With the default link scripts this does not happen. Yet we need to use
-#       a script so that we can split code and data (including read-only) to
-#       different sections (and later to different ram blocks).
-#       
-#     WORKAROUND: 
-#       Use -G0 flag so that _gp indexing is disabled. There is a performance
-#       hit, though. In effect we're telling the compiler to NOT use $gp for
-#       indexed access to any global variables.
-#       This is only necessary for the 'bare' target (no external ram and no
-#       cache) and will have to be fixed for regular targets (by using a 
-#       standard link script or fixing mine).
+# NOTE:
+# A link script '/src/ion_noxram.lds' was used in previous versions of the
+# project. It is no longer used. It is known to be buggy and will be removed.
 #-------------------------------------------------------------------------------
 
 
@@ -105,14 +86,7 @@ XRAM_ADDRESS = 0x80000000
 # (See comment above about -G0 flag)
 CFLAGS = -O2 -Wall -c -s -fno-builtin -mips1 -G0
 
-# For most simulations and demos we'll use these parameters
-# Set code to BRAM and use XRAM for data
-# This will only work for small programs that fit the BRAM
-LFLAGS_BOOT = -Ttext $(CODE_BRAM_ADDRESS) -Tdata $(XRAM_ADDRESS) -eentry -I elf32-big
-
-# For some simulations we'll want to use TB1 which requires splitting code and
-# data. Use project 'bare cpu' linker script and build elf-bigendian objects.
-LFLAGS_BARE = -T../ion_noxram.lds -I elf32-big -eentry
+# LFLAGS: linker options are in the respective makefiles
 
 ### Project directories ########################################################
 

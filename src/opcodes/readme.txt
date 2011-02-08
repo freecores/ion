@@ -10,13 +10,16 @@ make opcodes_sim
 Read ../readme.txt for some warnings on the makefile configuration.
 
 
-The makefile will build a binary that you can run in the software simulator:
-
-    slite opcodes.bin
-
-It will build a vhdl test bench at /vhdl/tb/mips_tb1.vhdl (overwriting) that you
-can try on your VHDL simulator with script sim_tb1.do. The provided script and 
+It will build a vhdl test bench at /vhdl/tb/mips_tb2.vhdl (overwriting) that you
+can try on your VHDL simulator with script sim_tb2.do. The provided script and 
 the VHDL code have some dependence on Modelsim, see project readme file.
+
+
+The makefile will too bouild some bionaries that you can run in the software 
+simulator:
+
+    slite --bram=opcodes.bin --xram=opcodes.data
+
 
 This code can't be used on real hardware (i/o is far too simple).
 

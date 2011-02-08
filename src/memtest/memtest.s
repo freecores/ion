@@ -22,7 +22,7 @@
     .set DEBUG,         0
 
     #---- 
-    .set XRAM_BASE,     0x80000000          # 1st XRAM address
+    #.set XRAM_BASE,     0x80000000          # 1st XRAM address
     .set XRAM_MAX,      1024                # max. no. of KB to test for
 
     .set UART_BASE,     0x20000000          # UART base address
@@ -41,12 +41,15 @@ entry:
     b       start_test
     nop
 
+    .ifgt   0
     #--- Trap handler address: we don't expect any traps -----------------------
-    .org    0x3c
+    #.org    0x3c
+    .org    0x0180
 interrupt_vector:
     b       interrupt_vector
     nop
-
+    .endif
+    
 #-------------------------------------------------------------------------------
 
 start_test:        
@@ -63,7 +66,7 @@ start_test:
     jal     puts
     nop
     
-    la      $t0,XRAM_BASE       # address of memory word being tested
+    la      $t0,XRAM_BASE+4     # address of memory word being tested
     li      $t2,XRAM_MAX        # max amount of KBs to test for
     li      $t3,1               # (used to decrement $t2)
     li      $t4,0               # no. of KBs found
@@ -108,7 +111,7 @@ end_test:                       # test done, ramtop+1 in $t0, #KB in $t4
     la      $a0,msg1            # Print ramtop message...
     jal     puts
     nop
-    move    $a0,$t0
+    addi    $a0,$t0,-4          # substract the +4 offset we added before
     li      $a1,8
     jal     put_hex
     nop
