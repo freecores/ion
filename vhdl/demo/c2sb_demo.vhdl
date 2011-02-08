@@ -80,7 +80,13 @@ signal write_tx :           std_logic;
 
 
 --##############################################################################
---
+-- I/O registers
+
+
+signal sd_clk_reg :         std_logic;
+signal sd_cs_reg :          std_logic;
+signal sd_cmd_reg :         std_logic;
+signal sd_do_reg :          std_logic;
 
 
 -- CPU access to hex display
@@ -188,8 +194,46 @@ begin
     );
 
 
-reg_display <= io_wr_data(15 downto 0);
-reg_gleds <= io_rd_vma & "000" & io_byte_we;
+--##############################################################################
+-- I/O registers
+--##############################################################################
+
+hex_display_register:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if io_byte_we/="0000" and io_wr_addr(15 downto 12)=X"2" then
+            reg_display <= io_wr_data(15 downto 0);
+        end if;
+    end if;
+end process hex_display_register;    
+    
+sd_control_register:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if io_byte_we/="0000" and io_wr_addr(15 downto 12)=X"1" then
+            if io_wr_addr(5)='1' then
+                sd_clk_reg <= io_wr_addr(4);
+            end if;
+            if io_wr_addr(7)='1' then
+                sd_cs_reg <= io_wr_addr(6);
+            end if;   
+            if io_wr_addr(11)='1' then
+                sd_do_reg <= io_wr_data(0);
+            end if;   
+        end if;
+    end if;
+end process sd_control_register;    
+
+    
+-- Show the SD interface signals on the green leds for debug
+reg_gleds <= sd_clk_reg & sd_in & sd_do_reg & "000" & sd_cmd_reg & sd_cs_reg;
+
+io_rd_data(0) <= sd_in;
+io_rd_data(31 downto 22) <= switches;
+
+
 
 -- red leds (light with '1') -- some CPU control signals
 red_leds(0) <= '0';
@@ -298,11 +342,18 @@ hex0 <= nibble_to_7seg(display_data( 3 downto  0));
 -- SD card interface
 --##############################################################################
 
--- unused in this demo
-sd_cs     <= '0';
-sd_cmd    <= '0';
-sd_clk    <= '0';
-sd_in     <= 'Z';
+-- Connect to FFs for use in bit-banged interface
+--sd_cs       <= sd_cs_reg;
+--sd_cmd      <= sd_do_reg;
+--sd_clk      <= sd_clk_reg;
+--sd_data     <= 'Z' when sd_do_reg='1' else '0';
+--sd_in       <= sd_data;
+
+sd_cs       <= sd_cs_reg;
+sd_cmd      <= sd_do_reg;
+sd_clk      <= sd_clk_reg;
+--sd_data     <= 'Z';-- when sd_do_reg='1' else '0';
+sd_in       <= sd_data;
 
 
 --##############################################################################
