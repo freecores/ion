@@ -51,36 +51,91 @@
 
 /*---- Definition of simulated system parameters -----------------------------*/
 
+/* Uncomment to simulate Plasma behavior (vectors & memory mapping) */
+//#define SIMULATE_PLASMA (1)
+
+#ifdef SIMULATE_PLASMA
 
 #define VECTOR_RESET (0x00000000)
 #define VECTOR_TRAP  (0x0000003c)
 
+#else
+
+#define VECTOR_RESET (0xbfc00000)
+#define VECTOR_TRAP  (0xbfc00180)
+
+#endif
+
+/** Definition of a memory block */
 typedef struct s_block {
     uint32_t start;
     uint32_t size;
     uint32_t mask;
+    uint32_t read_only;
     uint8_t  *mem;
-    char     *name;
+    char     *area_name;
 } t_block;
 
 
-/* Here's where we define the memory areas (blocks) of the system.
-   Memory decoding is done in the order the blocks are defined; the address
-   is anded with field .mask and then compared to field .start. If they match
-   the address modulo the field .size is used to index the memory block, giving
-   a 'mirror' effect. All of this simulates the behavior of the actual hardware.
-   Make sure the blocks don't overlap or the scheme will fail.
+/*  Here's where we define the memory areas (blocks) of the system.
+
+    The blocks should be defined in this order: BRAM, XRAM, FLASH
+
+    BRAM is FPGA block ram initialized with bootstrap code
+    XRAM is external SRAM
+    FLASH is external flash
+
+    Give any area a size of 0x0 to leave it unused.
+
+    When a binary file is specified in the cmd line for one of these areas, it
+    will be used to initialize it, checking bounds.
+
+
+    Memory decoding is done in the order the blocks are defined; the address
+    is anded with field .mask and then compared to field .start. If they match
+    the address modulo the field .size is used to index the memory block, giving
+    a 'mirror' effect. All of this simulates how the actual hardware works.
+    Make sure the blocks don't overlap or the scheme will fail.
 */
 
-#define NUM_MEM_BLOCKS (2)
+#define NUM_MEM_BLOCKS (3)
 
-t_block default_blocks[NUM_MEM_BLOCKS] = {
+#ifdef SIMULATE_PLASMA
+
+t_block memory_map_default[NUM_MEM_BLOCKS] = {
     /* meant as bootstrap block, though it's read/write */
-    {VECTOR_RESET,  0x00010000, 0xf0000000, NULL, "Boot"},
-    /* main ram block  */
-    {0x80000000,    0x00001000, 0xf0000000, NULL, "Data"}
+    {VECTOR_RESET,  0x00000800, 0xf0000000, 1, NULL, "Boot BRAM"},
+    /* main external ram block  */
+    {0x80000000,    0x00001000, 0xf0000000, 0, NULL, "XRAM"},
+    /* external flash block -- not used in plasma simulation */
+    {0xb0000000,    0x00000000, 0xf0000000, 0, NULL, "Flash"},
 };
 
+#else
+
+t_block memory_map_default[NUM_MEM_BLOCKS] = {
+    /* Bootstrap BRAM, read only */
+    {VECTOR_RESET,  0x00004800, 0xf8000000, 1, NULL, "Boot BRAM"},
+    /* main external ram block  */
+    {0x00000000,    0x00008000, 0xf8000000, 0, NULL, "XRAM"},
+    /* external flash block */
+    {0xb0000000,    0x00010000, 0xf8000000, 0, NULL, "Flash"},
+};
+
+#endif
+
+/*---- end of system parameters ----------------------------------------------*/
+
+
+/** Values for the command line arguments */
+typedef struct s_args {
+    char *bin_filename[NUM_MEM_BLOCKS]; /**< bin file to load to area or null */
+} t_args;
+/** Parse cmd line args globally accessible */
+t_args cmd_line_args;
+
+
+/*---- Endianess conversion macros -------------------------------------------*/
 
 #define ntohs(A) ( ((A)>>8) | (((A)&0xff)<<8) )
 #define htons(A) ntohs(A)
@@ -257,6 +312,9 @@ void log_cycle(t_state *s);
 void log_read(t_state *s, int full_address, int word_value, int size, int log);
 void log_failed_assertions(t_state *s);
 
+int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args);
+void usage(void);
+
 /* CPU model */
 void free_cpu(t_state *s);
 int init_cpu(t_state *s);
@@ -320,7 +378,8 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     /* point ptr to the byte in the block, or NULL is the address is unmapped */
     ptr = 0;
     for(i=0;i<NUM_MEM_BLOCKS;i++){
-        if((address & s->blocks[i].mask) == s->blocks[i].start){
+        if((address & s->blocks[i].mask) ==
+           (s->blocks[i].start & s->blocks[i].mask)){
             ptr = (unsigned)(s->blocks[i].mem) +
                   ((address - s->blocks[i].start) % s->blocks[i].size);
             break;
@@ -450,15 +509,20 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
         return;
     }
 
-    //ptr = (unsigned int)s->mem + (address % MEM_SIZE);
-    if(address >= 0x80000000){
-        ptr = 1;
-    }
     ptr = 0;
     for(i=0;i<NUM_MEM_BLOCKS;i++){
-        if((address & s->blocks[i].mask) == s->blocks[i].start){
+        if((address & s->blocks[i].mask) ==
+                  (s->blocks[i].start & s->blocks[i].mask)){
             ptr = (unsigned)(s->blocks[i].mem) +
                             ((address - s->blocks[i].start) % s->blocks[i].size);
+
+            if(s->blocks[i].read_only){
+                if(s->t.log!=NULL && log!=0){
+                    fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR READ ONLY\n",
+                    s->op_addr, address, mask, dvalue);
+                    return;
+                }
+            }
             break;
         }
     }
@@ -824,7 +888,7 @@ void cycle(t_state *s, int show_mode){
         epc = epc - 4;
         }
         s->epc = epc;
-        s->pc_next = 0x3c;
+        s->pc_next = VECTOR_TRAP;
         s->skip = 1;
         s->exceptionId = 0;
         s->userMode = 0;
@@ -958,30 +1022,28 @@ void do_debug(t_state *s){
 }
 
 /** Read binary code and data files */
-int read_program(t_state *s, uint32_t num_files, char **file_names){
+int read_binary_files(t_state *s, t_args *args){
     FILE *in;
     uint32_t bytes, i, files_read=0;
 
     for(i=0;i<NUM_MEM_BLOCKS;i++){
-        if(i<num_files){
-            in = fopen(file_names[i], "rb");
+        if(args->bin_filename[i]!=NULL){
+
+            in = fopen(args->bin_filename[i], "rb");
             if(in == NULL){
                 free_cpu(s);
-                printf("Can't open file %s, quitting!\n",file_names[i]);
-                getch();
-                return(2);
+                printf("Can't open file %s, quitting!\n",args->bin_filename[i]);
+                return(0);
             }
 
             bytes = fread(s->blocks[i].mem, 1, s->blocks[i].size, in);
             fclose(in);
-            printf("%-16s [size= %6d, start= 0x%08x]\n",
-                    s->blocks[i].name,
-                    bytes,
-                    s->blocks[i].start);
+            printf("%-16s [size= %6dKB, start= 0x%08x] loaded %d bytes.\n",
+                    s->blocks[i].area_name,
+                    s->blocks[i].size/1024,
+                    s->blocks[i].start,
+                    bytes);
             files_read++;
-        }
-        else{
-            break;
         }
     }
 
@@ -999,26 +1061,20 @@ int read_program(t_state *s, uint32_t num_files, char **file_names){
 int main(int argc,char *argv[]){
     t_state state, *s=&state;
 
-    printf("MIPS-I emulator\n");
+    printf("MIPS-I emulator (" __DATE__ ")\n\n");
     if(!init_cpu(s)){
         printf("Trouble allocating memory, quitting!\n");
-        getch();
         return 1;
     };
 
-    /* do a minimal check on args */
-    if(argc==3 || argc==2){
-        /* */
-    }
-    else{
-        printf("Usage:");
-        printf("    slite file.exe <bin code file> [<bin data file>]\n");
+    if(parse_cmd_line(argc,argv, &cmd_line_args)==0){
         return 0;
     }
 
-    if(!read_program(s, argc-1, &(argv[1]))){
+    if(!read_binary_files(s, &cmd_line_args)){
         return 2;
     }
+    printf("\n\n");
 
     init_trace_buffer(s, "sw_sim_log.txt");
 
@@ -1152,7 +1208,6 @@ void free_cpu(t_state *s){
     for(i=0;i<NUM_MEM_BLOCKS;i++){
         free(s->blocks[i].mem);
         s->blocks[i].mem = NULL;
-
     }
 }
 
@@ -1167,11 +1222,14 @@ int init_cpu(t_state *s){
 
     memset(s, 0, sizeof(t_state));
     s->big_endian = 1;
+
+    /* Initialize memory map */
     for(i=0;i<NUM_MEM_BLOCKS;i++){
-        s->blocks[i].start =  default_blocks[i].start;
-        s->blocks[i].size =  default_blocks[i].size;
-        s->blocks[i].name =  default_blocks[i].name;
-        s->blocks[i].mask =  default_blocks[i].mask;
+        s->blocks[i].start =  memory_map_default[i].start;
+        s->blocks[i].size =  memory_map_default[i].size;
+        s->blocks[i].area_name =  memory_map_default[i].area_name;
+        s->blocks[i].mask =  memory_map_default[i].mask;
+        s->blocks[i].read_only =  memory_map_default[i].read_only;
 
         s->blocks[i].mem = (unsigned char*)malloc(s->blocks[i].size);
 
@@ -1184,4 +1242,57 @@ int init_cpu(t_state *s){
         memset(s->blocks[i].mem, 0, s->blocks[i].size);
     }
     return NUM_MEM_BLOCKS;
+}
+
+int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
+    uint32_t i;
+
+    /* fill cmd line args with default values */
+    for(i=0;i<NUM_MEM_BLOCKS;i++){
+        args->bin_filename[i] = NULL;
+    }
+
+    /* parse actual cmd line args */
+    for(i=1;i<argc;i++){
+        if(strcmp(argv[i],"--plasma")==0){
+            #ifdef SIMULATE_PLASMA
+                /* program compiled for plasma compatibility, no problem */
+            #else
+                /* program compiled for mips-1 compatibility, error*/
+                printf("Error: program compiled for compatibility to MIPS-I\n");
+                return 0;
+            #endif
+        }
+        else if(strncmp(argv[i],"--bram=", strlen("--bram="))==0){
+            args->bin_filename[0] = &(argv[i][strlen("--bram=")]);
+        }
+        else if(strncmp(argv[i],"--flash=", strlen("--flash="))==0){
+            args->bin_filename[2] = &(argv[i][strlen("--flash=")]);
+        }
+        else if(strncmp(argv[i],"--xram=", strlen("--xram="))==0){
+            args->bin_filename[1] = &(argv[i][strlen("--xram=")]);
+        }
+        else if((strcmp(argv[i],"--help")==0)||(strcmp(argv[i],"-h")==0)){
+            usage();
+            return 0;
+        }
+        else{
+            printf("unknown argument '%s'\n\n",argv[i]);
+            usage();
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+void usage(void){
+    printf("Usage:");
+    printf("    slite file.exe [arguments]\n");
+    printf("Arguments:\n");
+    printf("--bram=<file name>      : BRAM initialization file\n");
+    printf("--xram=<file name>      : XRAM initialization file\n");
+    printf("--flash=<file name>     : FLASH initialization file\n");
+    printf("--plasma                : Simulate Plasma instead of MIPS-I\n");
+    printf("--help, -h              : Show this usage text\n");
 }
