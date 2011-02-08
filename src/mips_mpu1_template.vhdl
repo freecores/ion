@@ -208,7 +208,9 @@ serial_rx : entity work.rs232_rx
 
 
 uart_write_tx <= '1' 
-    when mpu_io_byte_we/="0000" and mpu_io_wr_addr(31 downto 28)=X"2" 
+    when mpu_io_byte_we/="0000" and 
+         mpu_io_wr_addr(31 downto 28)=X"2" and
+         mpu_io_wr_addr(15 downto 12)=X"0"
     else '0';
 
 serial_tx : entity work.rs232_tx 
@@ -225,7 +227,9 @@ serial_tx : entity work.rs232_tx
 data_uart <= data_uart_status; -- FIXME no data rx yet
 data_uart_status <= X"0000000" & "00" & uart_tx_rdy & uart_rx_rdy;
 
-mpu_io_rd_data <= data_uart;
+mpu_io_rd_data <= 
+    data_uart when mpu_io_rd_addr(15 downto 12)=X"0" else
+    io_rd_data;
 
 -- io_rd_data 
 io_rd_addr <= mpu_io_rd_addr;
