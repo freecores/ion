@@ -11,7 +11,7 @@
 				<Option object_output="obj\Debug\" />
 				<Option type="1" />
 				<Option compiler="gcc" />
-				<Option parameters="..\..\..\src\opcodes\opcodes.bin" />
+				<Option parameters="--bram=..\..\..\src\hello\hello.code --xram=..\..\..\src\hello\hello.data" />
 				<Compiler>
 					<Add option="-g" />
 				</Compiler>
