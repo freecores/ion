@@ -34,6 +34,7 @@ memtest:
 # Create VHDL file for simulation test bench using TB2 template
 memtest_sim: memtest
 	$(TO_VHDL) --code memtest.code --data memtest.data \
+		--flash flash.bin --flash_size 128 \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2

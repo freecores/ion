@@ -107,11 +107,15 @@ bad_word:                       # readback error detected (maybe r/o area?)
     b       end_test
     nop
 
-end_test:                       # test done, ramtop+1 in $t0, #KB in $t4
+end_test:                       # test done, ramtop+4 in $t0, #KB in $t4
+    
+
     la      $a0,msg1            # Print ramtop message...
     jal     puts
     nop
     addi    $a0,$t0,-4          # substract the +4 offset we added before
+    move    $sp,$t0             # init SP at the top of RAM space
+    addi    $sp,$sp,-4
     li      $a1,8
     jal     put_hex
     nop
@@ -119,12 +123,68 @@ end_test:                       # test done, ramtop+1 in $t0, #KB in $t4
     jal     puts
     nop
     
+    # FIXME now we should so some strong test on the RAM to see if it's wired
+    # correctly, using the right timing, etc.
+    
+    # Ok, now we know we have some RAM and stack space we can do some further
+    # testing.
+    # dump the first few words of FLASH
+    
+    la      $a0,msg2
+    jal     puts
+    nop
+    
+    # FIXME flash base address is hardcoded
+    li      $a0,0xb0000000
+    jal     put_hex
+    ori     $a1,$zero,8
+    
+    la      $a0,crlf
+    jal     puts
+    nop
+
+    la      $a0,crlf
+    jal     puts
+    nop
+    
+    li      $a0,0xb0000000
+    jal     dump_hex
+    ori     $a1,$zero,24
+   
+    
 $DONE:
     j       $DONE               # ...and freeze here
     nop
 
 
 #---- Functions ----------------------------------------------------------------
+
+# void dump_hex(int *address, int len)
+dump_hex:
+    move    $t7,$a0
+    move    $t8,$a1
+    sw      $ra,0($sp)
+    addi    $sp,$sp,-4
+    
+dump_hex_loop:
+    lw      $a0,0($t7)
+    jal     put_hex
+    li      $a1,8
+    
+    la      $a0,space
+    jal     puts
+    addi    $t7,4
+    
+    addi    $t8,$t8,-1
+    bnez    $t8,dump_hex_loop
+    nop
+    
+    lw      $ra,4($sp)
+    jr      $ra
+    addi    $sp,$sp,4
+
+
+#--- Special functions that do not use any RAM ---------------------------------
 # WARNING: Not for general use!
 # All parameters in $a0..$a4, stack unused. No attempt to comply with any ABI
 # has been made.
@@ -133,17 +193,17 @@ $DONE:
    
 # void puts(char *s) -- print zero-terminated string
 puts: 
-    la      $s0,UART_BASE       # UART base address
+    la      $a2,UART_BASE       # UART base address
 puts_loop:
     lb      $v0,0($a0)
     beqz    $v0,puts_end
     addiu   $a0,1
 puts_wait_tx_rdy:    
-    lw      $v1,UART_STATUS($s0)
+    lw      $v1,UART_STATUS($a2)
     andi    $v1,$v1,0x02
     beqz    $v1,puts_wait_tx_rdy
     nop
-    sw      $v0,UART_TX($s0)
+    sw      $v0,UART_TX($a2)
     b       puts_loop
     nop
     
@@ -153,8 +213,8 @@ puts_end:
 
 # void put_hex(int n, int d) -- print integer as d-digit hex
 put_hex:
-    la      $s0,UART_BASE
-    la      $s1,put_hex_table
+    la      $a2,UART_BASE
+    la      $a3,put_hex_table
     addi    $a1,-1
     add     $a1,$a1,$a1
     add     $a1,$a1,$a1
@@ -162,14 +222,14 @@ put_hex:
 put_hex_loop:
     srlv    $v0,$a0,$a1
     andi    $v0,$v0,0x0f
-    addu    $s2,$s1,$v0
+    addu    $s2,$a3,$v0
     lb      $v0,0($s2)
 put_hex_wait_tx_rdy:
-    lw      $v1,UART_STATUS($s0)
+    lw      $v1,UART_STATUS($a2)
     andi    $v1,$v1,0x02
     beqz    $v1,put_hex_wait_tx_rdy
     nop
-    sw      $v0,UART_TX($s0)
+    sw      $v0,UART_TX($a2)
     
     bnez    $a1,put_hex_loop
     addi    $a1,-4
@@ -196,6 +256,8 @@ msg_mirror:
     .asciz "hit mirror!\n\r"
 msg_bad:
     .asciz "bad readback!\n\r"
+msg2:
+    .asciz "\n\rDumping the first few words of FLASH at address 0x"
     
     .set    reorder
     .end    entry
