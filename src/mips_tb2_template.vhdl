@@ -84,24 +84,27 @@ type t_sram is array(0 to SRAM_SIZE*2-1) of std_logic_vector(7 downto 0);
 signal sram1 : t_sram := (@data31@);
 signal sram0 : t_sram := (@data20@);
 
+signal sram_chip_addr :     std_logic_vector(SRAM_ADDR_SIZE downto 1);
+signal sram_output :        std_logic_vector(15 downto 0);
+
 -- PROM table and interface signals --------------------------------------------
 
 -- We'll simulate a 16-bit-wide static PROM (e.g. a Flash) with some serious
 -- cycle time (70 or 90 ns).
 
---constant PROM_SIZE : integer := @flash_table_size@;
---constant PROM_ADDR_SIZE : integer := log2(PROM_SIZE);
---
---subtype t_prom_address is std_logic_vector(PROM_ADDR_SIZE-1 downto 0);
---type t_prom is array(0 to PROM_SIZE-1) of t_hword;
---
---signal prom_rd_addr :       t_prom_address; 
---signal prom_databus :       t_hword;
---signal prom_oe_n :          std_logic;
---
----- bram0 is LSB, bram3 is MSB
---signal prom : t_prom := (@flash@);
---
+constant PROM_SIZE : integer := @prom_size@;
+constant PROM_ADDR_SIZE : integer := log2(PROM_SIZE);
+
+subtype t_prom_address is std_logic_vector(PROM_ADDR_SIZE-1 downto 0);
+type t_prom is array(0 to PROM_SIZE-1) of t_word;
+
+signal prom_rd_addr :       t_prom_address; 
+signal prom_output :        std_logic_vector(7 downto 0);
+signal prom_oe_n :          std_logic;
+
+-- bram0 is LSB, bram3 is MSB
+signal prom : t_prom := (@flash@);
+
 
 
 -- I/O devices -----------------------------------------------------------------
@@ -119,8 +122,9 @@ signal interrupt :          std_logic := '0';
 signal done :               std_logic := '0';
 
 -- interface to asynchronous 16-bit-wide external SRAM
-signal sram_address :       std_logic_vector(SRAM_ADDR_SIZE downto 1);
-signal sram_databus :       std_logic_vector(15 downto 0);
+signal sram_address :       std_logic_vector(31 downto 0);
+signal sram_data_rd :       std_logic_vector(15 downto 0);
+signal sram_data_wr :       std_logic_vector(15 downto 0);
 signal sram_byte_we_n :     std_logic_vector(1 downto 0);
 signal sram_oe_n :          std_logic;
 
@@ -200,7 +204,7 @@ begin
     cache: entity work.mips_cache_stub
     generic map (
         BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
-        SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
+        SRAM_ADDR_SIZE => 32 -- we need the full address to decode sram vs flash
     )
     port map (
         clk             => clk,
@@ -240,7 +244,8 @@ begin
         
         -- interface to asynchronous 16-bit-wide external SRAM
         sram_address    => sram_address,
-        sram_databus    => sram_databus,
+        sram_data_rd    => sram_data_rd,
+        sram_data_wr    => sram_data_wr,
         sram_byte_we_n  => sram_byte_we_n,
         sram_oe_n       => sram_oe_n
     );
@@ -308,45 +313,51 @@ begin
         end if;
     end process data_ram_block;
 
-    sram_databus <=
-        sram1(conv_integer(unsigned(sram_address))) &
-        sram0(conv_integer(unsigned(sram_address)))   when sram_oe_n='0'
+    sram_data_rd <= 
+        X"00" & prom_output when sram_address(31 downto 27)="10110" else
+        sram_output;
+            
+
+
+    -- Do a very basic simulation of an external SRAM ---------------
+
+    sram_chip_addr <= sram_address(SRAM_ADDR_SIZE downto 1);
+
+    -- FIXME should add some verification of /WE 
+    sram_output <=
+        sram1(conv_integer(unsigned(sram_chip_addr))) &
+        sram0(conv_integer(unsigned(sram_chip_addr)))   when sram_oe_n='0'
         else (others => 'Z');
 
-    -- Do a very basic simulation of an external SRAM
-    simulated_sram:
+    simulated_sram_write:
     process(sram_byte_we_n, sram_address, sram_oe_n)
     begin
         -- Write cycle
         -- FIXME should add OE\ to write control logic
         if sram_byte_we_n'event or sram_address'event then
             if sram_byte_we_n(1)='0' then
-                sram1(conv_integer(unsigned(sram_address))) <= sram_databus(15 downto  8);
+                sram1(conv_integer(unsigned(sram_chip_addr))) <= sram_data_wr(15 downto  8);
             end if;
             if sram_byte_we_n(0)='0' then
-                sram0(conv_integer(unsigned(sram_address))) <= sram_databus( 7 downto  0);
+                sram0(conv_integer(unsigned(sram_chip_addr))) <= sram_data_wr( 7 downto  0);
             end if;            
         end if;
+    end process simulated_sram_write;
 
-        -- Read cycle
-        -- FIXME should add some verification of /WE 
-        --if sram_oe_n'event or sram_address'event then
-        --    if sram_oe_n='0' then
-        --        sram_databus <= 
-        --            sram1(conv_integer(unsigned(sram_address))) &
-        --            sram0(conv_integer(unsigned(sram_address)));
-        --    else
-        --        sram_databus <= (others => 'Z');
-        --    end if;
-        --end if;
-
-    end process simulated_sram;
 
     -- Do a very basic simulation of an external PROM wired to the same bus 
     -- as the sram (both are static).
---    prom_databus <=
---        prom(conv_integer(unsigned(sram_address))) when prom_oe_n='0'
---        else (others => 'Z');            
+    
+    prom_rd_addr <= sram_address(PROM_ADDR_SIZE+1 downto 2);
+    
+    prom_oe_n <= sram_oe_n;
+    
+    prom_output <=
+        prom(conv_integer(unsigned(prom_rd_addr)))(31 downto 24) when prom_oe_n='0' and sram_address(1 downto 0)="00" else
+        prom(conv_integer(unsigned(prom_rd_addr)))(23 downto 16) when prom_oe_n='0' and sram_address(1 downto 0)="01" else
+        prom(conv_integer(unsigned(prom_rd_addr)))(15 downto  8) when prom_oe_n='0' and sram_address(1 downto 0)="10" else
+        prom(conv_integer(unsigned(prom_rd_addr)))( 7 downto  0) when prom_oe_n='0' and sram_address(1 downto 0)="11" else
+        (others => 'Z');            
     
     
     simulated_io:

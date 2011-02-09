@@ -8,6 +8,7 @@ import math
 
 
 def usage():
+    print ""
     print "usage:"
     print "python bin2hdl.py [arguments]\n"
     print "Inserts data in VHDL template\n"
@@ -17,8 +18,10 @@ def usage():
     print "{a|architecture} <name>    Name of target VHDL architecture"
     print "{e|entity} <name>          Name of target VHDL entity"
     print "{o|output} <filename>      Target VHDL file name"
-    print "code_size <number>         Size of code memory in words (decimal)"
+    print "code_size <number>         Size of bram memory in words (decimal)"
     print "data_size <number>         Size of data memory in words (decimal)"
+    print "flash_size <number>        Size of flash memory in words (decimal)"
+    print "(note the flash and xram info are used in simulation only)"
     print ""
     print "Additionally, any of these arguments can be given:"
     print "{s|sim_len} <number>       Length of simulation in clock cycles"
@@ -45,8 +48,43 @@ def help():
     print "@data_addr_size@      : ceil(Log2(@data_table_size@))"
     
 
+def build_vhdl_flash_table(flash, table_size, indent_size):
+    # Build vhdl table for flash data
+       
+    # fill up empty table space with zeros
+    if len(flash) < table_size*4:
+        flash = flash + '\0'*4*(table_size-len(flash)/4)
+            
+    num_words = len(flash)/4
+    remaining = num_words;
+    col = 0
+    vhdl_flash_string = "\n" + " "*indent_size
+    for w in range(num_words):
+        b0 = ord(flash[w*4+0]);
+        b1 = ord(flash[w*4+1]);
+        b2 = ord(flash[w*4+2]);
+        b3 = ord(flash[w*4+3]);
+        
+        if remaining > 1:
+            item = "X\"%02X%02X%02X%02X\"," % (b0, b1, b2, b3)
+        else:
+            item = "X\"%02X%02X%02X%02X\"" % (b0, b1, b2, b3)
+        
+        remaining = remaining - 1
+        col = col + 1
+        if col == 4:
+           col = 0
+           item = item + "\n" + " "*indent_size
+        
+        vhdl_flash_string = vhdl_flash_string + item
+    
+    return vhdl_flash_string
+
+    
+    
 def build_vhdl_tables(code,table_size, indent_size):
     # Build the four byte column tables. [0] is LSB, [3] is MSB
+    # Useful only for BRAM and SRAM tables
     tables = [[0 for i in range(table_size)] for i in range(4)]
 
     # Separate binary data into byte columns
@@ -136,8 +174,9 @@ def build_vhdl_tables(code,table_size, indent_size):
     return vhdl_data_strings
     
 def main(argv):
-    code_filename = ""          # file with code sections (text+reginfo+rodata)
-    data_filename = ""          # file with data sections (data+bss)
+    code_filename = ""          # file with bram contents ('code')
+    data_filename = ""          # file with xram contents ('data')
+    flash_filename = ""         # file with flash contents ('flash')
     vhdl_filename = ""          # name of vhdl template file
     entity_name = "mips_tb"     # name of vhdl entity to be generated
     arch_name = "testbench"     # name of vhdl architecture to be generated
@@ -145,17 +184,21 @@ def main(argv):
     indent = 4                  # indentation for table data, in spaces
     code_table_size = -1        # size of VHDL table
     data_table_size = -1        # size of VHDL table
+    flash_table_size = 32;      # default size of flash table in 32-bit words
+    flash = ['\0']*4*flash_table_size # default simulated flash
     bin_words = 0               # size of binary file in 32-bit words 
     simulation_length = 22000   # length of logic simulation in clock cycles
     
     #
 
     try:                                
-        opts, args = getopt.getopt(argv, "hc:d:v:a:e:o:i:s:", 
+        opts, args = getopt.getopt(argv, "hc:d:v:a:e:o:i:s:f:", 
         ["help", "code=", "data=", "vhdl=", "architecture=", 
-         "entity=", "output=", "indent=", "sim_len=",
-         "code_size=", "data_size="])
-    except getopt.GetoptError:
+         "entity=", "output=", "indent=", "sim_len=", "flash=",
+         "code_size=", "data_size=", "flash_size="])
+    except getopt.GetoptError, err:
+        print ""
+        print err
         usage()
         sys.exit(2)  
 
@@ -173,6 +216,8 @@ def main(argv):
             code_filename = arg
         elif opt in ("-d", "--data"):
             data_filename = arg
+        elif opt in ("-f", "--flash"):
+            flash_filename = arg
         elif opt in ("-a", "--architecture"):
             arch_name = arg
         elif opt in ("-e", "--entity"):
@@ -185,6 +230,8 @@ def main(argv):
             code_table_size = int(arg)
         elif opt == "--data_size":
             data_table_size = int(arg)
+        elif opt == "--flash_size":
+            flash_table_size = int(arg)
     
     # See if all mandatory options are there
     if code_filename=="" or vhdl_filename=="" or \
@@ -213,6 +260,17 @@ def main(argv):
             except IOError:
                 print "Binary File %s not found" % data_filename
         
+    if flash_filename != "":
+        if flash_filename == "empty":
+            flash = [0]*flash_table_size
+        else:
+            try:
+                fin = open(flash_filename, "rb")
+                flash = fin.read()
+                fin.close()
+            except IOError:
+                print "Binary File %s not found" % flash_filename
+                
     #print "Read " + str(len(code)) + " bytes."
     
     # Make sure the code and data will fit in the tables
@@ -229,6 +287,13 @@ def main(argv):
             print "Data does not fit table: " + str(bin_words) + " words,",
             print str(data_table_size) + " table entries"
             sys.exit(1)
+    
+    if flash_filename != "":
+        bin_words = len(flash) / 4
+        if bin_words > flash_table_size:
+            print "Flash data does not fit table: " + str(bin_words) + " words,",
+            print str(flash_table_size) + " table entries"
+            sys.exit(1)
 
 
     # Build the VHDL strings for each slice of both code and data tables
@@ -239,6 +304,8 @@ def main(argv):
         # In case we didn't get a data binary, we want the vhdl compilation 
         # to fail when @data@ tags are used, just to catch the error
         vhdl_data_strings = ["error: missing data binary file"]*6
+    
+    vhdl_flash_string = build_vhdl_flash_table(flash, flash_table_size, indent)
     
     # Now start scanning the VHDL template, inserting data where needed
     
@@ -254,19 +321,23 @@ def main(argv):
                 "@data0@","@data1@","@data2@","@data3@",
                 "@data31@", "@data20@",
                 "@data-32bit@",
+                "@flash@",
                 "@entity_name@","@arch_name@",
                 "@sim_len@",
                 "@xram_size@",
                 "@code_table_size@","@code_addr_size@",
-                "@data_table_size@","@data_addr_size@"];
+                "@data_table_size@","@data_addr_size@",
+                "@prom_size@"];
     replacement = vhdl_code_strings + vhdl_data_strings + \
-                 [entity_name, arch_name, 
+                 [vhdl_flash_string,
+                  entity_name, arch_name, 
                   str(simulation_length),
                   str(data_table_size),
                   str(code_table_size),
                   str(int(math.floor(math.log(code_table_size,2)))),
                   str(data_table_size), 
-                  str(int(math.floor(math.log(data_table_size,2))))]
+                  str(int(math.floor(math.log(data_table_size,2)))),
+                  str(flash_table_size)]
     
     # Now traverse the template lines replacing any keywords with the proper 
     # vhdl stuff we just built above.
