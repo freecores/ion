@@ -84,6 +84,27 @@ type t_sram is array(0 to SRAM_SIZE*2-1) of std_logic_vector(7 downto 0);
 signal sram1 : t_sram := (@data31@);
 signal sram0 : t_sram := (@data20@);
 
+-- PROM table and interface signals --------------------------------------------
+
+-- We'll simulate a 16-bit-wide static PROM (e.g. a Flash) with some serious
+-- cycle time (70 or 90 ns).
+
+--constant PROM_SIZE : integer := @flash_table_size@;
+--constant PROM_ADDR_SIZE : integer := log2(PROM_SIZE);
+--
+--subtype t_prom_address is std_logic_vector(PROM_ADDR_SIZE-1 downto 0);
+--type t_prom is array(0 to PROM_SIZE-1) of t_hword;
+--
+--signal prom_rd_addr :       t_prom_address; 
+--signal prom_databus :       t_hword;
+--signal prom_oe_n :          std_logic;
+--
+---- bram0 is LSB, bram3 is MSB
+--signal prom : t_prom := (@flash@);
+--
+
+
+-- I/O devices -----------------------------------------------------------------
 
 signal data_uart :          std_logic_vector(31 downto 0);
 signal data_uart_status :   std_logic_vector(31 downto 0);
@@ -309,19 +330,25 @@ begin
 
         -- Read cycle
         -- FIXME should add some verification of /WE 
-        if sram_oe_n'event or sram_address'event then
-            if sram_oe_n='0' then
-                sram_databus <= 
-                    sram1(conv_integer(unsigned(sram_address))) &
-                    sram0(conv_integer(unsigned(sram_address)));
-            else
-                sram_databus <= (others => 'Z');
-            end if;
-        end if;
+        --if sram_oe_n'event or sram_address'event then
+        --    if sram_oe_n='0' then
+        --        sram_databus <= 
+        --            sram1(conv_integer(unsigned(sram_address))) &
+        --            sram0(conv_integer(unsigned(sram_address)));
+        --    else
+        --        sram_databus <= (others => 'Z');
+        --    end if;
+        --end if;
 
     end process simulated_sram;
 
-
+    -- Do a very basic simulation of an external PROM wired to the same bus 
+    -- as the sram (both are static).
+--    prom_databus <=
+--        prom(conv_integer(unsigned(sram_address))) when prom_oe_n='0'
+--        else (others => 'Z');            
+    
+    
     simulated_io:
     process(clk)
     variable i : integer;
