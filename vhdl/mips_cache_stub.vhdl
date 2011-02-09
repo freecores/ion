@@ -49,14 +49,20 @@
 -- 
 -- Apart from the very rough looks of the code, there's a few known problems:
 --
--- 1.- Access to unmapped areas wil crash the CPU
+-- 1.- Write address setup and hold wrt. WE\ not guaranteed
+--      WE\ needs to be asserted later and deasserted earlier. The easy way 
+--      would be using two extra cycles. Must find some less cosly way.
+--      So far, in my particular test conditions, this is not giving me trouble
+--      so this will have to wait.
+-- 
+-- 2.- Access to unmapped areas will crash the CPU
 --      A couple states are missing in the state machine for handling accesses 
 --      to unmapped areas. I haven't yet decided how to handle that (return 
---      zero, trigger trap, mirror another mapped area...)
--- 2.- Code refills from SRAM is unimplemented yet
+--      zero, trigger trap, mirror another mapped area...).
+--
+-- 3.- Code refills from SRAM is unimplemented yet
 --      To be done for sheer lack of time.
--- 3.- Address decoding is hardcoded in mips_pkg
---      It should be done here using module generics and not package constants.
+--
 -- 4.- Does not work as a real 1-word cache yet
 --      That functionality is still missing, all accesses 'miss'. It should be
 --      implemented, as a way to test the real cache logic on a small scale.
@@ -123,6 +129,9 @@ end entity mips_cache_stub;
 
 architecture stub of mips_cache_stub is
 
+-- Wait state counter -- we're supporting static memory from 10 to >100 ns
+subtype t_wait_state_counter is std_logic_vector(2 downto 0);
+
 -- state machines: definition of states -----------------------------
 
 type t_code_cache_state is (
@@ -142,6 +151,8 @@ type t_code_cache_state is (
 
 -- I-cache state machine state register & next state
 signal cps, cns :           t_code_cache_state;
+-- Wait state counter, formally part of the state machine register
+signal code_wait_ctr :      t_wait_state_counter;
 
 
 type t_data_cache_state is (
@@ -158,10 +169,15 @@ type t_data_cache_state is (
     
     data_write_io_0,            -- wr addr & data in io_wr_*, io_byte_we active
 
-    data_writethrough_sram_0,   -- wr addr & data in SRAM buses (low hword)
-    data_writethrough_sram_1,   -- wr addr & data in SRAM buses (high hword)
+    data_writethrough_sram_0a,  -- wr addr & data in SRAM buses (low hword)
+    data_writethrough_sram_0b,  -- WE asserted
+    data_writethrough_sram_0c,  -- WE deasserted
+    data_writethrough_sram_1a,  -- wr addr & data in SRAM buses (high hword)
+    data_writethrough_sram_1b,  -- WE asserted
+    data_writethrough_sram_1c,  -- WE deasserted
     
     data_ignore_write,          -- hook for raising error flag FIXME untested
+    data_ignore_read,           -- hook for raising error flag FIXME untested
 
     data_bug                    -- caught an error in the state machine
    );
@@ -169,6 +185,12 @@ type t_data_cache_state is (
 
 -- D-cache state machine state register & next state
 signal dps, dns :           t_data_cache_state;
+-- Wait state counter, formally part of the state machine register
+signal dws_ctr, dws :       t_wait_state_counter;
+signal load_dws_ctr :       std_logic;
+signal dws_wait_done :      std_logic;
+
+
 
 -- CPU interface registers ------------------------------------------
 signal data_rd_addr_reg :   t_pc;
@@ -226,19 +248,9 @@ signal data_rd_addr_mask :  t_addr_decode;
 signal data_wr_addr_mask :  t_addr_decode;
 
 -- Memory map area being accessed for each of the 3 buses:
--- 00 -> BRAM (read only)
--- 01 -> SRAM
--- 10 -> IO
--- 11 -> Unmapped
-
 signal code_rd_attr :       t_range_attr;
 signal data_rd_attr :       t_range_attr;
 signal data_wr_attr :       t_range_attr;
-signal code_rd_type :       t_memory_type;
-signal data_rd_type :       t_memory_type;
-signal data_wr_type :       t_memory_type;
-
-
 
 begin
 
@@ -261,7 +273,7 @@ end process cache_state_machine_regs;
 
 -- (The code state machine occasionally 'waits' for the D-cache)
 code_state_machine_transitions:
-process(cps, dps, code_rd_vma, code_miss, code_rd_type, 
+process(cps, dps, code_rd_vma, code_miss, code_rd_attr, 
         write_pending, read_pending)
 begin
     case cps is
@@ -312,25 +324,27 @@ end process code_state_machine_transitions;
 -- This state machine does not overlap IO/BRAM/SRAM accesses for simplicity.
 
 data_state_machine_transitions:
-process(dps, write_pending, read_pending, data_rd_type, data_wr_type)
+process(dps, write_pending, read_pending, 
+        data_rd_attr, data_wr_attr, dws_wait_done)
 begin
     case dps is
     when data_normal =>
         if write_pending='1' then
-            case data_wr_type is
+            case data_wr_attr.mem_type is
             when MT_BRAM        => dns <= data_ignore_write;
-            when MT_SRAM_16B    => dns <= data_writethrough_sram_0;
+            when MT_SRAM_16B    => dns <= data_writethrough_sram_0a;
             when MT_IO_SYNC     => dns <= data_write_io_0;
-            when others         => dns <= dps; -- ignore write to undecoded area
+            -- FIXME ignore write to undecoded area (clear pending flag)                        
+            when others         => dns <= dps; 
             end case;
             
         elsif read_pending='1' then
-            case data_rd_type is
+            case data_rd_attr.mem_type is
             when MT_BRAM        => dns <= data_refill_bram_0;
             when MT_SRAM_16B    => dns <= data_refill_sram_0;
             when MT_IO_SYNC     => dns <= data_read_io_0;
-            when others         => dns <= dps; -- ignore read from undec. area
-                           -- FIXME should raise debug flag 
+            -- FIXME ignore read from undecoded area (clear pending flag) 
+            when others         => dns <= data_ignore_read; 
             end case;
         else
             dns <= dps;
@@ -346,10 +360,18 @@ begin
         dns <= data_normal;
 
     when data_refill_sram_0 =>
-        dns <= data_refill_sram_1;
+        if dws_wait_done='1' then
+            dns <= data_refill_sram_1;
+        else
+            dns <= dps;
+        end if;
 
     when data_refill_sram_1 =>
-        dns <= data_normal;
+        if dws_wait_done='1' then
+            dns <= data_normal;
+        else
+            dns <= dps;
+        end if;
 
     when data_refill_bram_0 =>
         dns <= data_refill_bram_1;
@@ -357,13 +379,37 @@ begin
     when data_refill_bram_1 =>
         dns <= data_normal;
 
-    when data_writethrough_sram_0 =>
-        dns <= data_writethrough_sram_1;
+    when data_writethrough_sram_0a =>
+        dns <= data_writethrough_sram_0b;
+        
+    when data_writethrough_sram_0b =>
+        if dws_wait_done='1' then
+            dns <= data_writethrough_sram_0c;
+        else
+            dns <= dps;
+        end if;
+    
+    when data_writethrough_sram_0c =>
+        dns <= data_writethrough_sram_1a;
+    
+    when data_writethrough_sram_1a =>
+        dns <= data_writethrough_sram_1b;
+    
+    when data_writethrough_sram_1b =>
+        if dws_wait_done='1' then
+            dns <= data_writethrough_sram_1c;
+        else
+            dns <= dps;
+        end if;    
 
-    when data_writethrough_sram_1 =>
+    when data_writethrough_sram_1c =>
         dns <= data_normal;
+        
 
     when data_ignore_write =>
+        dns <= data_normal;
+
+    when data_ignore_read =>
         dns <= data_normal;
 
     when data_bug =>
@@ -377,7 +423,38 @@ begin
     end case;
 end process data_state_machine_transitions;
 
+load_dws_ctr <= '1' when 
+    (dns=data_refill_sram_0 and dps/=data_refill_sram_0) or
+    (dns=data_refill_sram_1 and dps/=data_refill_sram_1) or
+    (dns=data_writethrough_sram_0a) or 
+    (dns=data_writethrough_sram_1a) 
+    else '0';
 
+with dns select dws <= 
+    data_rd_attr.wait_states    when data_refill_sram_0,
+    data_wr_attr.wait_states    when data_writethrough_sram_0a,
+    data_wr_attr.wait_states    when data_writethrough_sram_1a,
+    data_wr_attr.wait_states    when others;
+    
+data_wait_state_counter:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            dws_ctr <= (others => '0');
+        else
+            if load_dws_ctr='1' then
+                dws_ctr <= dws;
+            elsif dws_wait_done='0' then
+                dws_ctr <= dws_ctr - 1;
+            end if;
+        end if;
+    end if;
+end process data_wait_state_counter;
+
+dws_wait_done <= '1' when dws_ctr="000" else '0';
+
+    
 --------------------------------------------------------------------------------
 -- CPU interface registers and address decoding --------------------------------
 
@@ -402,7 +479,8 @@ begin
                 data_rd_addr_reg <= data_rd_addr(31 downto 2);
             elsif dps=data_refill_sram_1 or 
                   dps=data_refill_bram_1 or 
-                  dps=data_read_io_0 then
+                  dps=data_read_io_0 or
+                  dps=data_ignore_read then
                 read_pending <= '0';
             end if;
 
@@ -414,7 +492,7 @@ begin
                 data_wr_reg <= data_wr;
                 data_wr_addr_reg <= data_wr_addr;
                 write_pending <= '1';
-            elsif dps=data_writethrough_sram_1 or
+            elsif dps=data_writethrough_sram_1b or
                   dps=data_write_io_0 or
                   dps=data_ignore_write then
                 write_pending <= '0';
@@ -451,30 +529,9 @@ data_wr_addr_mask <= data_wr_addr_reg(31 downto t_addr_decode'low);
 
 
 code_rd_attr <= decode_addr(code_rd_addr_mask);
-code_rd_type <= code_rd_attr(6 downto 4);
-
 data_rd_attr <= decode_addr(data_rd_addr_mask);
-data_rd_type <= data_rd_attr(6 downto 4);
-
 data_wr_attr <= decode_addr(data_wr_addr_mask);
-data_wr_type <= data_wr_attr(6 downto 4);
 
-
---with code_rd_addr_mask select code_rd_type <=
---    "000"   when ADDR_BOOT,
---    "001"   when ADDR_XRAM,
---    "011"   when others;
---
---with data_rd_addr_mask select data_rd_type <=
---    "000"   when ADDR_BOOT,
---    "001"   when ADDR_XRAM,
---    "010"   when ADDR_IO,
---    "011"   when others;
---
---with data_wr_addr_mask select data_wr_type <=
---    "001"   when ADDR_XRAM,
---    "010"   when ADDR_IO,
---    "011"   when others;
 
 --------------------------------------------------------------------------------
 -- BRAM interface
@@ -587,8 +644,12 @@ with dps select sram_address(sram_address'high downto 2) <=
 -- SRAM addr bus LSB depends on the D-cache state because we read/write the
 -- halfwords sequentially in successive cycles.
 with dps select sram_address(1) <=
-    '0'     when data_writethrough_sram_0,
-    '1'     when data_writethrough_sram_1,
+    '0'     when data_writethrough_sram_0a,
+    '0'     when data_writethrough_sram_0b,
+    '0'     when data_writethrough_sram_0c,
+    '1'     when data_writethrough_sram_1a,
+    '1'     when data_writethrough_sram_1b,
+    '1'     when data_writethrough_sram_1c,
     '0'     when data_refill_sram_0,
     '1'     when data_refill_sram_1,
     '0'     when others;
@@ -596,14 +657,18 @@ with dps select sram_address(1) <=
 -- SRAM databus i(when used for output) comes from either hword of the data
 -- write register.
 with dps select sram_databus <=
-    data_wr_reg(31 downto 16)   when data_writethrough_sram_0,
-    data_wr_reg(15 downto  0)   when data_writethrough_sram_1,
+    data_wr_reg(31 downto 16)   when data_writethrough_sram_0a,
+    data_wr_reg(31 downto 16)   when data_writethrough_sram_0b,
+    data_wr_reg(31 downto 16)   when data_writethrough_sram_0c,
+    data_wr_reg(15 downto  0)   when data_writethrough_sram_1a,
+    data_wr_reg(15 downto  0)   when data_writethrough_sram_1b,
+    data_wr_reg(15 downto  0)   when data_writethrough_sram_1c,    
     (others => 'Z')             when others;
 
 -- The byte_we is split in two similarly.
 with dps select sram_byte_we_n <=
-    not byte_we_reg(3 downto 2) when data_writethrough_sram_0,
-    not byte_we_reg(1 downto 0) when data_writethrough_sram_1,
+    not byte_we_reg(3 downto 2) when data_writethrough_sram_0b,
+    not byte_we_reg(1 downto 0) when data_writethrough_sram_1b,
     "11"                        when others;
 
 -- SRAM OE\ is only asserted low for read cycles
@@ -620,7 +685,9 @@ sram_input_halfword_register:
 process(clk)
 begin
     if clk'event and clk='1' then
-        sram_rd_data_reg <= sram_databus;
+        if dps=data_refill_sram_0 then
+            sram_rd_data_reg <= sram_databus;
+        end if;
     end if;
 end process sram_input_halfword_register;
 
@@ -653,8 +720,12 @@ with cps select code_wait <=
 -- Assert code_wait until the cycle where the CPU has valid data word on its
 -- code bus AND no other operations are ongoing that may use the external buses.
 with dps select data_wait <=
-    '1' when data_writethrough_sram_0,
-    '1' when data_writethrough_sram_1,
+    '1' when data_writethrough_sram_0a,
+    '1' when data_writethrough_sram_0b,
+    '1' when data_writethrough_sram_0c,
+    '1' when data_writethrough_sram_1a,
+    '1' when data_writethrough_sram_1b,
+    '1' when data_writethrough_sram_1c,
     '1' when data_refill_sram_0,
     '1' when data_refill_sram_1,
     '1' when data_refill_bram_0,

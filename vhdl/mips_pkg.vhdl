@@ -43,12 +43,9 @@ constant TRAP_VECTOR : t_word       := X"bfc00180";
 -- This is the slice of the address that will be used to decode memory areas
 subtype t_addr_decode is std_logic_vector(31 downto 24);
 
--- 'Attributes' of some memory block -- used when decoding memory addresses
--- type[3] : can_write[1] : cacheable[1] : delay_states[2]
-subtype t_range_attr is std_logic_vector(6 downto 0);
 -- Part of the memory area attribute: the type of memory determines how the
 -- cache module handles each block
-subtype t_memory_type is std_logic_vector(2 downto 0);
+subtype t_memory_type is std_logic_vector(7 downto 5);
 -- These are all the types the cache knows about
 constant MT_BRAM : t_memory_type            := "000";
 constant MT_IO_SYNC : t_memory_type         := "001";
@@ -56,6 +53,18 @@ constant MT_SRAM_16B : t_memory_type        := "010";
 constant MT_FLASH_16B : t_memory_type       := "011";
 constant MT_DDR_16B : t_memory_type         := "100";
 constant MT_UNMAPPED : t_memory_type        := "111";
+
+-- Wait state counter -- we're supporting static memory from 10 to >100 ns
+subtype t_wait_state_count is std_logic_vector(2 downto 0);
+
+-- 'Attributes' of some memory block -- used when decoding memory addresses
+type t_range_attr is record
+    mem_type :          t_memory_type;
+    writeable :         std_logic;
+    cacheable :         std_logic;    
+    wait_states :       t_wait_state_count;
+end record t_range_attr;
+
 
 
 ---- More basic types and constants --------------------------------------------
@@ -127,10 +136,10 @@ function decode_addr_plasma(addr : t_addr_decode) return t_range_attr is
 begin
 
     case addr(31 downto 27) is 
-    when "00000"    => return MT_BRAM     &"0"&"0"&"00"; -- useg
-    when "10000"    => return MT_SRAM_16B &"1"&"1"&"00"; -- kseg0
-    when "00100"    => return MT_IO_SYNC  &"1"&"0"&"00"; -- kseg1 i/o
-    when others     => return MT_UNMAPPED &"0"&"0"&"00"; -- stray
+    when "00000"    => return (MT_BRAM     ,'0','0',"000"); -- useg
+    when "10000"    => return (MT_SRAM_16B ,'1','1',"000"); -- kseg0
+    when "00100"    => return (MT_IO_SYNC  ,'1','0',"000"); -- kseg1 i/o
+    when others     => return (MT_UNMAPPED ,'0','0',"000"); -- stray
     end case;
 
 end function decode_addr_plasma;
@@ -140,13 +149,13 @@ function decode_addr_mips1(addr : t_addr_decode) return t_range_attr is
 begin
 
     case addr(31 downto 27) is 
-    when "00000"    => return MT_SRAM_16B &"1"&"1"&"00"; -- useg
-    when "10000"    => return MT_SRAM_16B &"1"&"1"&"00"; -- kseg0
-    --when "10100"    => return MT_IO_SYNC  &"1"&"0"&"00"; -- kseg1 i/o
-    when "00100"    => return MT_IO_SYNC  &"1"&"0"&"00"; -- kseg1 i/o
-    when "10110"    => return MT_FLASH_16B&"0"&"0"&"10"; -- kseg1 flash
-    when "10111"    => return MT_BRAM     &"0"&"0"&"00"; -- kseg1 boot rom
-    when others     => return MT_UNMAPPED &"0"&"0"&"00"; -- stray
+    when "00000"    => return (MT_SRAM_16B ,'1','1',"011"); -- useg
+    when "10000"    => return (MT_SRAM_16B ,'1','1',"000"); -- kseg0
+    --when "10100"    => return (MT_IO_SYNC  ,'1','0',"000"); -- kseg1 i/o
+    when "00100"    => return (MT_IO_SYNC  ,'1','0',"000"); -- kseg1 i/o
+    when "10110"    => return (MT_FLASH_16B,'0','0',"011"); -- kseg1 flash
+    when "10111"    => return (MT_BRAM     ,'0','0',"000"); -- kseg1 boot rom
+    when others     => return (MT_UNMAPPED ,'0','0',"000"); -- stray
     end case;
 
 end function decode_addr_mips1;
