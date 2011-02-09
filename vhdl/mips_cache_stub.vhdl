@@ -49,11 +49,12 @@
 -- 
 -- Apart from the very rough looks of the code, there's a few known problems:
 --
--- 1.- Write address setup and hold wrt. WE\ not guaranteed
---      WE\ needs to be asserted later and deasserted earlier. The easy way 
---      would be using two extra cycles. Must find some less cosly way.
---      So far, in my particular test conditions, this is not giving me trouble
---      so this will have to wait.
+-- 1.- Write cycles too long
+--      In order to guarantee setup and hold times for WE controlled write 
+--      cycles, two extra clock cycles are inserted for each SRAM write access.
+--      This is the most reliable way and the easiest but probably not the best.
+--      Until I come up with something better, write cycles to SRAM are going
+--      to be very slow.
 -- 
 -- 2.- Access to unmapped areas will crash the CPU
 --      A couple states are missing in the state machine for handling accesses 
