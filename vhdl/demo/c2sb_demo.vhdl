@@ -64,7 +64,7 @@ architecture minimal of c2sb_demo is
 --##############################################################################
 --
 
-constant SRAM_ADDR_SIZE : integer := 18;
+constant SRAM_ADDR_SIZE : integer := 32;
 
 --##############################################################################
 -- RS232 interface signals
@@ -130,8 +130,9 @@ signal io_wr_data :         std_logic_vector(31 downto 0);
 signal io_rd_vma :          std_logic;
 signal io_byte_we :         std_logic_vector(3 downto 0);
 
-signal mpu_sram_address :   std_logic_vector(SRAM_ADDR_SIZE downto 1);
-signal mpu_sram_databus :   std_logic_vector(15 downto 0);
+signal mpu_sram_address :   std_logic_vector(SRAM_ADDR_SIZE-1 downto 0);
+signal mpu_sram_data_rd :   std_logic_vector(15 downto 0);
+signal mpu_sram_data_wr :   std_logic_vector(15 downto 0);
 signal mpu_sram_byte_we_n : std_logic_vector(1 downto 0);
 signal mpu_sram_oe_n :      std_logic;
 
@@ -181,10 +182,10 @@ begin
 
         -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
         sram_address    => mpu_sram_address,
-        sram_databus    => sram_data,
+        sram_data_rd    => mpu_sram_data_rd,
+        sram_data_wr    => mpu_sram_data_wr,
         sram_byte_we_n  => mpu_sram_byte_we_n,
         sram_oe_n       => mpu_sram_oe_n,
-
 
         uart_rxd    => rxd,
         uart_txd    => txd,
@@ -253,27 +254,46 @@ red_leds(9) <= clk_1hz;
 --##############################################################################
 
 --##############################################################################
--- FLASH (flash is unused in this demo)
+-- FLASH (connected to the same mup bus as the sram)
 --##############################################################################
 
-flash_addr <= (others => '0');
-flash_we_n <= '1'; -- all enable signals inactive
-flash_oe_n <= '1';
+flash_we_n <= '1'; -- all write control signals inactive
 flash_reset_n <= '1';
 
+flash_addr(21 downto 18) <= (others => '0');
+flash_addr(17 downto  0) <= mpu_sram_address(17 downto 0); -- FIXME
+
+-- Flash is decoded at 0xb0000000
+flash_oe_n <= '0' 
+    when mpu_sram_address(31 downto 27)="10110" and mpu_sram_oe_n='0'
+    else '1';
+
+
 
 --##############################################################################
--- SRAM (used as 64K x 8)
---
--- NOTE: All writes go to SRAM independent of rom paging status
+-- SRAM
 --##############################################################################
 
-sram_addr <= mpu_sram_address;
-sram_oe_n <= mpu_sram_oe_n;
+sram_addr <= mpu_sram_address(sram_addr'high+1 downto 1);
+sram_oe_n <= '0'    
+    when mpu_sram_address(31 downto 27)="00000" and mpu_sram_oe_n='0'
+    else '1';
+
 sram_ub_n <= mpu_sram_byte_we_n(1) and mpu_sram_oe_n;
 sram_lb_n <= mpu_sram_byte_we_n(0) and mpu_sram_oe_n;
 sram_ce_n <= '0';
 sram_we_n <= mpu_sram_byte_we_n(1) and mpu_sram_byte_we_n(0);
+
+sram_data <= mpu_sram_data_wr when mpu_sram_byte_we_n/="11" else (others => 'Z');
+
+-- The only reason we need this mux is because we have the static RAM and the
+-- static flash in separate FPGA pins, whereas in a real world application they
+-- would be on the same data+address bus
+mpu_sram_data_rd <= 
+    -- SRAM is decoded at 0x00000000
+    sram_data when mpu_sram_address(31 downto 27)="00000" else
+    X"00" & flash_data;
+
 
 
 --##############################################################################
@@ -281,6 +301,8 @@ sram_we_n <= mpu_sram_byte_we_n(1) and mpu_sram_byte_we_n(0);
 --##############################################################################
 
 -- Use button 3 as reset
+-- This FF chain only prevents metastability trouble, it does not help with
+-- switching bounces.
 reset_synchronization:
 process(clk)
 begin
@@ -342,17 +364,10 @@ hex0 <= nibble_to_7seg(display_data( 3 downto  0));
 -- SD card interface
 --##############################################################################
 
--- Connect to FFs for use in bit-banged interface
---sd_cs       <= sd_cs_reg;
---sd_cmd      <= sd_do_reg;
---sd_clk      <= sd_clk_reg;
---sd_data     <= 'Z' when sd_do_reg='1' else '0';
---sd_in       <= sd_data;
-
+-- Connect to FFs for use in bit-banged interface (still unused)
 sd_cs       <= sd_cs_reg;
 sd_cmd      <= sd_do_reg;
 sd_clk      <= sd_clk_reg;
---sd_data     <= 'Z';-- when sd_do_reg='1' else '0';
 sd_in       <= sd_data;
 
 

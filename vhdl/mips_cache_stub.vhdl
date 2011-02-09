@@ -32,7 +32,7 @@
 -- For example, under Quartus-2 and with a Cyclone-2 grade -7 device, the
 -- worst Tco for the SRAM data pins is below 5 ns, enough to use a 10ns SRAM
 -- with a 20 ns clock cycle.
--- Anyway, you need to take care of this yourself.
+-- Anyway, you need to take care of this yourself (constraints).
 --
 --------------------------------------------------------------------------------
 -- Interface to CPU
@@ -118,9 +118,10 @@ entity mips_cache_stub is
         bram_byte_we    : out std_logic_vector(3 downto 0);
         bram_data_rd_vma: out std_logic;
 
-        -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
-        sram_address    : out std_logic_vector(SRAM_ADDR_SIZE downto 1);
-        sram_databus    : inout std_logic_vector(15 downto 0);
+        -- interface to asynchronous 16-bit-wide or 8-bit-wide static memory
+        sram_address    : out std_logic_vector(SRAM_ADDR_SIZE-1 downto 0);
+        sram_data_rd    : in std_logic_vector(15 downto 0);
+        sram_data_wr    : out std_logic_vector(15 downto 0);
         sram_byte_we_n  : out std_logic_vector(1 downto 0);
         sram_oe_n       : out std_logic
     );
@@ -161,6 +162,11 @@ type t_data_cache_state is (
 
     data_refill_sram_0,         -- rd addr in SRAM addr bus (low hword)
     data_refill_sram_1,         -- rd addr in SRAM addr bus (high hword)
+
+    data_refill_sram8_0,        -- rd addr in SRAM addr bus (byte 0)
+    data_refill_sram8_1,        -- rd addr in SRAM addr bus (byte 1)
+    data_refill_sram8_2,        -- rd addr in SRAM addr bus (byte 2)
+    data_refill_sram8_3,        -- rd addr in SRAM addr bus (byte 3)
 
     data_refill_bram_0,         -- rd addr in bram_rd_addr
     data_refill_bram_1,         -- rd data in bram_rd_data
@@ -203,7 +209,7 @@ signal byte_we_reg :        std_logic_vector(3 downto 0);
 
 -- SRAM interface ---------------------------------------------------
 -- Stores first (high) HW read from SRAM
-signal sram_rd_data_reg :   std_logic_vector(31 downto 16);
+signal sram_rd_data_reg :   std_logic_vector(31 downto 8);
 -- Data read from SRAM, valid in refill_1
 signal sram_rd_data :       t_word;
 
@@ -343,6 +349,7 @@ begin
             case data_rd_attr.mem_type is
             when MT_BRAM        => dns <= data_refill_bram_0;
             when MT_SRAM_16B    => dns <= data_refill_sram_0;
+            when MT_SRAM_8B     => dns <= data_refill_sram8_0;
             when MT_IO_SYNC     => dns <= data_read_io_0;
             -- FIXME ignore read from undecoded area (clear pending flag) 
             when others         => dns <= data_ignore_read; 
@@ -359,6 +366,34 @@ begin
    
     when data_read_io_1 =>
         dns <= data_normal;
+
+    when data_refill_sram8_0 =>
+        if dws_wait_done='1' then
+            dns <= data_refill_sram8_1;
+        else
+            dns <= dps;
+        end if;
+
+    when data_refill_sram8_1 =>
+        if dws_wait_done='1' then
+            dns <= data_refill_sram8_2;
+        else
+            dns <= dps;
+        end if;
+
+    when data_refill_sram8_2 =>
+        if dws_wait_done='1' then
+            dns <= data_refill_sram8_3;
+        else
+            dns <= dps;
+        end if;
+
+    when data_refill_sram8_3 =>
+        if dws_wait_done='1' then
+            dns <= data_normal;
+        else
+            dns <= dps;
+        end if;
 
     when data_refill_sram_0 =>
         if dws_wait_done='1' then
@@ -427,12 +462,21 @@ end process data_state_machine_transitions;
 load_dws_ctr <= '1' when 
     (dns=data_refill_sram_0 and dps/=data_refill_sram_0) or
     (dns=data_refill_sram_1 and dps/=data_refill_sram_1) or
+    (dns=data_refill_sram8_0 and dps/=data_refill_sram8_0) or
+    (dns=data_refill_sram8_1 and dps/=data_refill_sram8_1) or
+    (dns=data_refill_sram8_2 and dps/=data_refill_sram8_2) or
+    (dns=data_refill_sram8_3 and dps/=data_refill_sram8_3) or
     (dns=data_writethrough_sram_0a) or 
     (dns=data_writethrough_sram_1a) 
     else '0';
 
 with dns select dws <= 
     data_rd_attr.wait_states    when data_refill_sram_0,
+    data_rd_attr.wait_states    when data_refill_sram_1,
+    data_rd_attr.wait_states    when data_refill_sram8_0,
+    data_rd_attr.wait_states    when data_refill_sram8_1,
+    data_rd_attr.wait_states    when data_refill_sram8_2,
+    data_rd_attr.wait_states    when data_refill_sram8_3,
     data_wr_attr.wait_states    when data_writethrough_sram_0a,
     data_wr_attr.wait_states    when data_writethrough_sram_1a,
     data_wr_attr.wait_states    when others;
@@ -479,6 +523,7 @@ begin
                 read_pending <= '1';
                 data_rd_addr_reg <= data_rd_addr(31 downto 2);
             elsif dps=data_refill_sram_1 or 
+                  dps=data_refill_sram8_3 or  
                   dps=data_refill_bram_1 or 
                   dps=data_read_io_0 or
                   dps=data_ignore_read then
@@ -614,7 +659,7 @@ begin
             data_cache_store <= (others => '0');
         else
             -- Refill data cache if necessary
-            if dps=data_refill_sram_1 then
+            if dps=data_refill_sram_1 or dps=data_refill_sram8_3 then
                 data_cache_tag_store <=
                     "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
                 data_cache_store <= sram_rd_data;
@@ -638,8 +683,12 @@ end process data_cache_memory;
 
 -- SRAM address bus (except for LSB) comes from cpu code or data addr registers
 with dps select sram_address(sram_address'high downto 2) <=
-    data_rd_addr_reg(sram_address'high downto 2)    when data_refill_sram_0,
-    data_rd_addr_reg(sram_address'high downto 2)    when data_refill_sram_1,
+    data_rd_addr_reg(sram_address'high downto 2)    when data_refill_sram_0 |
+                                                         data_refill_sram_1 |
+                                                         data_refill_sram8_0 |
+                                                         data_refill_sram8_1 |
+                                                         data_refill_sram8_2 |
+                                                         data_refill_sram8_3,
     data_wr_addr_reg(sram_address'high downto 2)    when others;
 
 -- SRAM addr bus LSB depends on the D-cache state because we read/write the
@@ -651,13 +700,23 @@ with dps select sram_address(1) <=
     '1'     when data_writethrough_sram_1a,
     '1'     when data_writethrough_sram_1b,
     '1'     when data_writethrough_sram_1c,
+    '0'     when data_refill_sram8_0,
+    '0'     when data_refill_sram8_1,
+    '1'     when data_refill_sram8_2,
+    '1'     when data_refill_sram8_3,
     '0'     when data_refill_sram_0,
     '1'     when data_refill_sram_1,
     '0'     when others;
 
+-- The lowest addr bit will only be used when accessing byte-wide memory
+with dps select sram_address(0) <=
+    '0'     when data_refill_sram8_0 | data_refill_sram8_2,
+    '1'     when others;
+    
+
 -- SRAM databus i(when used for output) comes from either hword of the data
 -- write register.
-with dps select sram_databus <=
+with dps select sram_data_wr <=
     data_wr_reg(31 downto 16)   when data_writethrough_sram_0a,
     data_wr_reg(31 downto 16)   when data_writethrough_sram_0b,
     data_wr_reg(31 downto 16)   when data_writethrough_sram_0c,
@@ -674,20 +733,32 @@ with dps select sram_byte_we_n <=
 
 -- SRAM OE\ is only asserted low for read cycles
 with dps select sram_oe_n <=
-    '0' when data_refill_sram_0,
-    '0' when data_refill_sram_1,
+    '0' when data_refill_sram_0 |
+             data_refill_sram_1 |
+             data_refill_sram8_0 |
+             data_refill_sram8_1 |
+             data_refill_sram8_2 |
+             data_refill_sram8_3,
     '1' when others;
 
 -- When eading from the SRAM, read word comes from read hword register and 
 -- SRAM bus (read register is loaded in previous cycle).
-sram_rd_data <= sram_rd_data_reg & sram_databus;
+with dps select sram_rd_data <= 
+    sram_rd_data_reg & sram_data_rd(7 downto 0)     when data_refill_sram8_3,
+    sram_rd_data_reg(31 downto 16) & sram_data_rd   when others;
 
 sram_input_halfword_register:
 process(clk)
 begin
     if clk'event and clk='1' then
         if dps=data_refill_sram_0 then
-            sram_rd_data_reg <= sram_databus;
+            sram_rd_data_reg(31 downto 16) <= sram_data_rd;
+        elsif dps=data_refill_sram8_0 then
+            sram_rd_data_reg(31 downto 24) <= sram_data_rd(7 downto 0);
+        elsif dps=data_refill_sram8_1 then
+            sram_rd_data_reg(23 downto 16) <= sram_data_rd(7 downto 0);
+        elsif dps=data_refill_sram8_2 then
+            sram_rd_data_reg(15 downto  8) <= sram_data_rd(7 downto 0);
         end if;
     end if;
 end process sram_input_halfword_register;
@@ -729,6 +800,10 @@ with dps select data_wait <=
     '1' when data_writethrough_sram_1c,
     '1' when data_refill_sram_0,
     '1' when data_refill_sram_1,
+    '1' when data_refill_sram8_0,
+    '1' when data_refill_sram8_1,
+    '1' when data_refill_sram8_2,
+    '1' when data_refill_sram8_3,
     '1' when data_refill_bram_0,
     '1' when data_refill_bram_1,
     '1' when data_read_io_0,

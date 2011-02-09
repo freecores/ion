@@ -50,7 +50,7 @@ subtype t_memory_type is std_logic_vector(7 downto 5);
 constant MT_BRAM : t_memory_type            := "000";
 constant MT_IO_SYNC : t_memory_type         := "001";
 constant MT_SRAM_16B : t_memory_type        := "010";
-constant MT_FLASH_16B : t_memory_type       := "011";
+constant MT_SRAM_8B : t_memory_type         := "011";
 constant MT_DDR_16B : t_memory_type         := "100";
 constant MT_UNMAPPED : t_memory_type        := "111";
 
@@ -144,16 +144,16 @@ begin
 
 end function decode_addr_plasma;
 
--- Address decoding for MIPS-I-like system
+-- Address decoding for MIPS-I-like system as implemented in target hardware
 function decode_addr_mips1(addr : t_addr_decode) return t_range_attr is
 begin
 
     case addr(31 downto 27) is 
-    when "00000"    => return (MT_SRAM_16B ,'1','1',"011"); -- useg
+    when "00000"    => return (MT_SRAM_16B ,'1','1',"000"); -- useg
     when "10000"    => return (MT_SRAM_16B ,'1','1',"000"); -- kseg0
     --when "10100"    => return (MT_IO_SYNC  ,'1','0',"000"); -- kseg1 i/o
     when "00100"    => return (MT_IO_SYNC  ,'1','0',"000"); -- kseg1 i/o
-    when "10110"    => return (MT_FLASH_16B,'0','0',"011"); -- kseg1 flash
+    when "10110"    => return (MT_SRAM_8B  ,'0','0',"011"); -- kseg1 flash
     when "10111"    => return (MT_BRAM     ,'0','0',"000"); -- kseg1 boot rom
     when others     => return (MT_UNMAPPED ,'0','0',"000"); -- stray
     end case;
