@@ -34,7 +34,8 @@ entity mips_mpu is
         
         -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
         sram_address    : out std_logic_vector(SRAM_ADDR_SIZE downto 1);
-        sram_databus    : inout std_logic_vector(15 downto 0);
+        sram_data_wr    : out std_logic_vector(15 downto 0);
+        sram_data_rd    : in std_logic_vector(15 downto 0);
         sram_byte_we_n  : out std_logic_vector(1 downto 0);
         sram_oe_n       : out std_logic;
 
@@ -151,9 +152,9 @@ signal bram :               t_bram := (
     X"03E00008",X"30420001",X"3C032000",X"8C620020",
     X"00000000",X"30420001",X"1040FFFC",X"3C022000",
     X"8C420000",X"03E00008",X"00000000",X"636F6D70",
-    X"696C6520",X"74696D65",X"3A204665",X"62202038",
-    X"20323031",X"31202D2D",X"2032323A",X"32353A30",
-    X"320A0000",X"67636320",X"76657273",X"696F6E3A",
+    X"696C6520",X"74696D65",X"3A204665",X"62202039",
+    X"20323031",X"31202D2D",X"2031343A",X"35313A35",
+    X"390A0000",X"67636320",X"76657273",X"696F6E3A",
     X"2020342E",X"342E310A",X"00000000",X"0A0A4865",
     X"6C6C6F20",X"576F726C",X"64210A0A",X"0A000000",
     X"00000000",X"00000000",X"00000000",X"00000000",
@@ -679,7 +680,8 @@ cache: entity work.mips_cache_stub
         
         -- interface to asynchronous 16-bit-wide external SRAM
         sram_address    => sram_address,
-        sram_databus    => sram_databus,
+        sram_data_rd    => sram_data_rd,
+        sram_data_wr    => sram_data_wr,
         sram_byte_we_n  => sram_byte_we_n,
         sram_oe_n       => sram_oe_n
     );

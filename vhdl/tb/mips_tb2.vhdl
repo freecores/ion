@@ -74,40 +74,40 @@ signal bram_data_rd_vma :   std_logic;
 
 -- bram0 is LSB, bram3 is MSB
 signal bram3 : t_bram := (
-    X"10",X"00",X"40",X"3C",X"24",X"0F",X"00",X"24",
-    X"24",X"0F",X"00",X"3C",X"24",X"0F",X"00",X"24",
-    X"24",X"24",X"24",X"01",X"AD",X"8D",X"11",X"00",
-    X"AD",X"8D",X"15",X"00",X"01",X"15",X"25",X"10",
-    X"00",X"10",X"00",X"10",X"00",X"3C",X"24",X"0F",
-    X"00",X"21",X"24",X"0F",X"00",X"3C",X"24",X"0F",
-    X"00",X"0B",X"00",X"3C",X"80",X"10",X"24",X"8E",
-    X"30",X"10",X"00",X"AE",X"10",X"00",X"03",X"00",
-    X"3C",X"3C",X"26",X"20",X"00",X"00",X"00",X"30",
-    X"02",X"82",X"8E",X"30",X"10",X"00",X"AE",X"14",
-    X"20",X"03",X"00",X"30",X"34",X"38",X"63",X"0A",
-    X"61",X"6E",X"78",X"6E",X"6D",X"72",X"74",X"00",
-    X"6E",X"52",X"74",X"61",X"20",X"20",X"20",X"0A",
-    X"20",X"74",X"72",X"21",X"62",X"72",X"62",X"21",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"3C",X"27",X"3C",X"24",X"3C",X"24",X"3C",X"27",
+    X"AC",X"00",X"14",X"24",X"0F",X"00",X"0B",X"23",
+    X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",
+    X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",X"AF",
+    X"AF",X"AF",X"40",X"23",X"AF",X"00",X"AF",X"00",
+    X"AF",X"3C",X"8C",X"00",X"8C",X"00",X"00",X"0F",
+    X"23",X"8F",X"8F",X"8F",X"8F",X"8F",X"8F",X"8F",
+    X"8F",X"8F",X"8F",X"8F",X"8F",X"8F",X"8F",X"8F",
+    X"8F",X"8F",X"8F",X"8F",X"8F",X"00",X"03",X"8F",
+    X"00",X"03",X"23",X"34",X"03",X"40",X"40",X"03",
+    X"40",X"00",X"00",X"3C",X"24",X"8C",X"00",X"AC",
+    X"8C",X"00",X"AC",X"8C",X"00",X"AC",X"8C",X"00",
+    X"03",X"AC",X"3C",X"37",X"03",X"00",X"AC",X"AC",
+    X"AC",X"AC",X"AC",X"AC",X"AC",X"AC",X"AC",X"AC",
+    X"AC",X"AC",X"03",X"34",X"8C",X"8C",X"8C",X"8C",
+    X"8C",X"8C",X"8C",X"8C",X"8C",X"8C",X"8C",X"8C",
+    X"00",X"03",X"34",X"00",X"00",X"00",X"03",X"AC",
+    X"00",X"03",X"00",X"3C",X"27",X"AF",X"0F",X"24",
+    X"3C",X"0F",X"24",X"3C",X"8F",X"24",X"0B",X"27",
+    X"3C",X"8C",X"00",X"30",X"10",X"3C",X"AC",X"03",
+    X"00",X"90",X"00",X"10",X"24",X"3C",X"3C",X"24",
+    X"10",X"00",X"24",X"8C",X"00",X"30",X"10",X"00",
+    X"AC",X"90",X"00",X"14",X"00",X"03",X"00",X"8C",
+    X"00",X"30",X"10",X"00",X"AC",X"0B",X"24",X"24",
+    X"3C",X"3C",X"24",X"00",X"30",X"2C",X"10",X"00",
+    X"8C",X"00",X"30",X"10",X"00",X"24",X"24",X"AD",
+    X"14",X"00",X"03",X"00",X"8C",X"00",X"30",X"10",
+    X"00",X"24",X"24",X"AD",X"14",X"00",X"03",X"00",
+    X"3C",X"8C",X"00",X"30",X"10",X"3C",X"24",X"AC",
+    X"03",X"00",X"3C",X"8C",X"03",X"30",X"3C",X"8C",
+    X"00",X"30",X"10",X"3C",X"8C",X"03",X"00",X"63",
+    X"69",X"74",X"3A",X"62",X"20",X"31",X"20",X"35",
+    X"34",X"67",X"76",X"69",X"20",X"34",X"00",X"0A",
+    X"6C",X"57",X"64",X"0A",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -332,40 +332,40 @@ signal bram3 : t_bram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
 signal bram2 : t_bram := (
-    X"00",X"00",X"80",X"04",X"84",X"F0",X"00",X"04",
-    X"05",X"F0",X"00",X"04",X"84",X"F0",X"00",X"08",
-    X"0A",X"0B",X"0C",X"00",X"00",X"09",X"A9",X"00",
-    X"08",X"09",X"28",X"00",X"4B",X"40",X"08",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"04",X"84",X"F0",
-    X"00",X"04",X"05",X"F0",X"00",X"04",X"84",X"F0",
-    X"00",X"F0",X"00",X"10",X"82",X"40",X"84",X"03",
-    X"63",X"60",X"00",X"02",X"00",X"00",X"E0",X"00",
-    X"10",X"11",X"31",X"A5",X"A5",X"A5",X"A4",X"42",
-    X"22",X"42",X"03",X"63",X"60",X"00",X"02",X"A0",
-    X"A5",X"E0",X"00",X"31",X"35",X"39",X"64",X"0D",
-    X"6E",X"67",X"74",X"61",X"65",X"79",X"20",X"46",
-    X"64",X"41",X"6F",X"74",X"20",X"20",X"30",X"0D",
-    X"00",X"20",X"72",X"0A",X"61",X"65",X"61",X"0A",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"1C",X"9C",X"05",X"A5",X"04",X"84",X"1D",X"BD",
+    X"A0",X"A4",X"60",X"A5",X"F0",X"00",X"F0",X"BD",
+    X"A1",X"A2",X"A3",X"A4",X"A5",X"A6",X"A7",X"A8",
+    X"A9",X"AA",X"AB",X"AC",X"AD",X"AE",X"AF",X"B8",
+    X"B9",X"BF",X"1A",X"5A",X"BA",X"00",X"BB",X"00",
+    X"BB",X"06",X"C4",X"00",X"C6",X"00",X"86",X"F0",
+    X"A5",X"A1",X"A2",X"A3",X"A4",X"A5",X"A6",X"A7",
+    X"A8",X"A9",X"AA",X"AB",X"AC",X"AD",X"AE",X"AF",
+    X"B8",X"B9",X"BF",X"BA",X"BB",X"00",X"60",X"BB",
+    X"00",X"60",X"BD",X"1B",X"40",X"9B",X"02",X"E0",
+    X"84",X"00",X"00",X"05",X"A5",X"A6",X"00",X"06",
+    X"A6",X"00",X"06",X"A6",X"00",X"06",X"A6",X"00",
+    X"E0",X"06",X"1A",X"5A",X"40",X"00",X"90",X"91",
+    X"92",X"93",X"94",X"95",X"96",X"97",X"9E",X"9C",
+    X"9D",X"9F",X"E0",X"02",X"90",X"91",X"92",X"93",
+    X"94",X"95",X"96",X"97",X"9E",X"9C",X"9D",X"9F",
+    X"00",X"E0",X"A2",X"85",X"00",X"00",X"E0",X"C4",
+    X"00",X"E0",X"00",X"04",X"BD",X"BF",X"F0",X"84",
+    X"04",X"F0",X"84",X"04",X"BF",X"84",X"F0",X"BD",
+    X"03",X"62",X"00",X"42",X"40",X"02",X"44",X"E0",
+    X"00",X"85",X"00",X"A0",X"07",X"03",X"06",X"08",
+    X"A7",X"00",X"84",X"62",X"00",X"42",X"40",X"00",
+    X"C5",X"85",X"00",X"A0",X"00",X"E0",X"00",X"62",
+    X"00",X"42",X"40",X"00",X"C8",X"F0",X"84",X"05",
+    X"02",X"08",X"07",X"A4",X"C6",X"C3",X"60",X"00",
+    X"43",X"00",X"63",X"60",X"00",X"C6",X"A5",X"06",
+    X"A7",X"A4",X"E0",X"00",X"43",X"00",X"63",X"60",
+    X"00",X"C6",X"A5",X"06",X"A7",X"A4",X"E0",X"00",
+    X"03",X"62",X"00",X"42",X"40",X"02",X"03",X"43",
+    X"E0",X"00",X"02",X"42",X"E0",X"42",X"03",X"62",
+    X"00",X"42",X"40",X"02",X"42",X"E0",X"00",X"6F",
+    X"6C",X"69",X"20",X"20",X"32",X"20",X"31",X"39",
+    X"0A",X"63",X"65",X"6F",X"20",X"2E",X"00",X"0A",
+    X"6C",X"6F",X"21",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -590,40 +590,40 @@ signal bram2 : t_bram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
 signal bram1 : t_bram := (
-    X"00",X"00",X"60",X"BF",X"01",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"BF",X"01",X"00",X"00",X"00",
-    X"04",X"00",X"00",X"68",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"50",X"FF",X"04",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"BF",X"01",X"00",
-    X"00",X"FF",X"00",X"00",X"00",X"BF",X"01",X"00",
-    X"00",X"00",X"00",X"20",X"00",X"00",X"00",X"00",
-    X"00",X"FF",X"00",X"00",X"FF",X"00",X"00",X"00",
-    X"20",X"BF",X"01",X"FF",X"28",X"28",X"10",X"00",
-    X"90",X"00",X"00",X"00",X"FF",X"00",X"00",X"FF",
-    X"FF",X"00",X"00",X"32",X"36",X"61",X"65",X"53",
-    X"6E",X"20",X"65",X"6C",X"6D",X"20",X"30",X"6F",
-    X"20",X"4D",X"70",X"20",X"20",X"20",X"78",X"00",
-    X"68",X"6D",X"6F",X"0D",X"64",X"61",X"63",X"0D",
+    X"00",X"7F",X"00",X"00",X"00",X"02",X"00",X"01",
+    X"00",X"18",X"FF",X"00",X"00",X"00",X"00",X"FF",
+    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"70",X"FF",X"00",X"D8",X"00",X"D8",
+    X"00",X"20",X"00",X"00",X"00",X"00",X"20",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"00",X"00",X"00",X"60",X"60",X"00",
+    X"60",X"00",X"00",X"BF",X"01",X"00",X"00",X"00",
+    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"10",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"00",X"00",X"10",X"20",X"00",X"00",
+    X"00",X"00",X"00",X"BF",X"FF",X"00",X"00",X"03",
+    X"BF",X"00",X"04",X"BF",X"00",X"04",X"00",X"00",
+    X"20",X"00",X"00",X"00",X"FF",X"20",X"00",X"00",
+    X"10",X"00",X"00",X"00",X"00",X"20",X"20",X"00",
+    X"00",X"00",X"00",X"00",X"00",X"00",X"FF",X"00",
+    X"00",X"00",X"00",X"FF",X"00",X"00",X"10",X"00",
+    X"00",X"00",X"FF",X"00",X"00",X"00",X"00",X"00",
+    X"20",X"20",X"FF",X"30",X"00",X"00",X"00",X"00",
+    X"00",X"00",X"00",X"FF",X"00",X"00",X"FF",X"00",
+    X"FF",X"30",X"00",X"00",X"00",X"00",X"00",X"FF",
+    X"00",X"00",X"FF",X"00",X"FF",X"30",X"00",X"00",
+    X"20",X"00",X"00",X"00",X"FF",X"20",X"00",X"00",
+    X"00",X"00",X"20",X"00",X"00",X"00",X"20",X"00",
+    X"00",X"00",X"FF",X"20",X"00",X"00",X"00",X"6D",
+    X"65",X"6D",X"46",X"20",X"30",X"2D",X"34",X"3A",
+    X"00",X"63",X"72",X"6E",X"34",X"31",X"00",X"48",
+    X"6F",X"72",X"0A",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -848,40 +848,40 @@ signal bram1 : t_bram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
 signal bram0 : t_bram := (
-    X"01",X"00",X"00",X"C0",X"5C",X"33",X"00",X"00",
-    X"08",X"40",X"00",X"C0",X"9C",X"33",X"00",X"04",
-    X"00",X"01",X"00",X"21",X"00",X"00",X"0A",X"00",
-    X"00",X"00",X"08",X"00",X"22",X"F7",X"00",X"05",
-    X"00",X"03",X"00",X"01",X"00",X"C0",X"7D",X"33",
-    X"00",X"FC",X"08",X"40",X"00",X"C0",X"9C",X"33",
-    X"00",X"31",X"00",X"00",X"00",X"08",X"01",X"20",
-    X"02",X"FD",X"00",X"00",X"F7",X"00",X"08",X"00",
-    X"00",X"C0",X"4C",X"FF",X"20",X"20",X"06",X"0F",
-    X"21",X"00",X"20",X"02",X"FD",X"00",X"00",X"F6",
-    X"FC",X"08",X"00",X"33",X"37",X"62",X"66",X"63",
-    X"69",X"65",X"72",X"20",X"6F",X"61",X"78",X"75",
-    X"58",X"20",X"20",X"20",X"20",X"20",X"00",X"20",
-    X"69",X"69",X"72",X"00",X"20",X"64",X"6B",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
-    X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
+    X"00",X"F0",X"00",X"00",X"00",X"00",X"00",X"E8",
+    X"00",X"2A",X"FD",X"04",X"8B",X"00",X"0E",X"98",
+    X"10",X"14",X"18",X"1C",X"20",X"24",X"28",X"2C",
+    X"30",X"34",X"38",X"3C",X"40",X"44",X"48",X"4C",
+    X"50",X"54",X"00",X"FC",X"58",X"10",X"5C",X"12",
+    X"60",X"00",X"20",X"00",X"10",X"00",X"24",X"E0",
+    X"00",X"10",X"14",X"18",X"1C",X"20",X"24",X"28",
+    X"2C",X"30",X"34",X"38",X"3C",X"40",X"44",X"48",
+    X"4C",X"50",X"54",X"58",X"5C",X"00",X"11",X"60",
+    X"00",X"13",X"68",X"01",X"08",X"00",X"00",X"08",
+    X"00",X"00",X"00",X"C0",X"88",X"00",X"00",X"3C",
+    X"04",X"00",X"40",X"08",X"00",X"44",X"0C",X"00",
+    X"08",X"48",X"00",X"3C",X"08",X"00",X"00",X"04",
+    X"08",X"0C",X"10",X"14",X"18",X"1C",X"20",X"24",
+    X"28",X"2C",X"08",X"00",X"00",X"04",X"08",X"0C",
+    X"10",X"14",X"18",X"1C",X"20",X"24",X"28",X"2C",
+    X"00",X"08",X"00",X"19",X"12",X"10",X"08",X"00",
+    X"0C",X"08",X"00",X"C0",X"E8",X"14",X"A1",X"DC",
+    X"C0",X"A1",X"04",X"C0",X"14",X"1C",X"A1",X"18",
+    X"00",X"20",X"00",X"02",X"FC",X"00",X"00",X"08",
+    X"21",X"00",X"00",X"11",X"0A",X"00",X"00",X"0D",
+    X"0E",X"00",X"01",X"20",X"00",X"02",X"FC",X"00",
+    X"00",X"00",X"00",X"F4",X"00",X"08",X"21",X"20",
+    X"00",X"02",X"FC",X"00",X"00",X"AB",X"01",X"1C",
+    X"00",X"00",X"FC",X"06",X"0F",X"0A",X"0D",X"00",
+    X"20",X"00",X"02",X"FC",X"00",X"30",X"FC",X"00",
+    X"F3",X"06",X"08",X"00",X"20",X"00",X"02",X"FC",
+    X"00",X"57",X"FC",X"00",X"E7",X"06",X"08",X"00",
+    X"00",X"20",X"00",X"02",X"FC",X"00",X"49",X"00",
+    X"08",X"00",X"00",X"20",X"08",X"01",X"00",X"20",
+    X"00",X"01",X"FC",X"00",X"00",X"08",X"00",X"70",
+    X"20",X"65",X"65",X"39",X"31",X"2D",X"3A",X"34",
+    X"00",X"20",X"73",X"3A",X"2E",X"0A",X"00",X"65",
+    X"20",X"6C",X"0A",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00",
@@ -1626,24 +1626,36 @@ signal sram0 : t_sram := (
     X"00",X"00",X"00",X"00",X"00",X"00",X"00",X"00"
     );
 
+signal sram_chip_addr :     std_logic_vector(SRAM_ADDR_SIZE downto 1);
+signal sram_output :        std_logic_vector(15 downto 0);
+
 -- PROM table and interface signals --------------------------------------------
 
 -- We'll simulate a 16-bit-wide static PROM (e.g. a Flash) with some serious
 -- cycle time (70 or 90 ns).
 
---constant PROM_SIZE : integer := @flash_table_size@;
---constant PROM_ADDR_SIZE : integer := log2(PROM_SIZE);
---
---subtype t_prom_address is std_logic_vector(PROM_ADDR_SIZE-1 downto 0);
---type t_prom is array(0 to PROM_SIZE-1) of t_hword;
---
---signal prom_rd_addr :       t_prom_address; 
---signal prom_databus :       t_hword;
---signal prom_oe_n :          std_logic;
---
----- bram0 is LSB, bram3 is MSB
---signal prom : t_prom := (@flash@);
---
+constant PROM_SIZE : integer := 32;
+constant PROM_ADDR_SIZE : integer := log2(PROM_SIZE);
+
+subtype t_prom_address is std_logic_vector(PROM_ADDR_SIZE-1 downto 0);
+type t_prom is array(0 to PROM_SIZE-1) of t_word;
+
+signal prom_rd_addr :       t_prom_address; 
+signal prom_output :        std_logic_vector(7 downto 0);
+signal prom_oe_n :          std_logic;
+
+-- bram0 is LSB, bram3 is MSB
+signal prom : t_prom := (
+    X"00000000",X"00000000",X"00000000",X"00000000",
+    X"00000000",X"00000000",X"00000000",X"00000000",
+    X"00000000",X"00000000",X"00000000",X"00000000",
+    X"00000000",X"00000000",X"00000000",X"00000000",
+    X"00000000",X"00000000",X"00000000",X"00000000",
+    X"00000000",X"00000000",X"00000000",X"00000000",
+    X"00000000",X"00000000",X"00000000",X"00000000",
+    X"00000000",X"00000000",X"00000000",X"00000000"
+    );
+
 
 
 -- I/O devices -----------------------------------------------------------------
@@ -1661,8 +1673,9 @@ signal interrupt :          std_logic := '0';
 signal done :               std_logic := '0';
 
 -- interface to asynchronous 16-bit-wide external SRAM
-signal sram_address :       std_logic_vector(SRAM_ADDR_SIZE downto 1);
-signal sram_databus :       std_logic_vector(15 downto 0);
+signal sram_address :       std_logic_vector(31 downto 0);
+signal sram_data_rd :       std_logic_vector(15 downto 0);
+signal sram_data_wr :       std_logic_vector(15 downto 0);
 signal sram_byte_we_n :     std_logic_vector(1 downto 0);
 signal sram_oe_n :          std_logic;
 
@@ -1742,7 +1755,7 @@ begin
     cache: entity work.mips_cache_stub
     generic map (
         BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
-        SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
+        SRAM_ADDR_SIZE => 32 -- we need the full address to decode sram vs flash
     )
     port map (
         clk             => clk,
@@ -1782,7 +1795,8 @@ begin
         
         -- interface to asynchronous 16-bit-wide external SRAM
         sram_address    => sram_address,
-        sram_databus    => sram_databus,
+        sram_data_rd    => sram_data_rd,
+        sram_data_wr    => sram_data_wr,
         sram_byte_we_n  => sram_byte_we_n,
         sram_oe_n       => sram_oe_n
     );
@@ -1850,45 +1864,51 @@ begin
         end if;
     end process data_ram_block;
 
-    sram_databus <=
-        sram1(conv_integer(unsigned(sram_address))) &
-        sram0(conv_integer(unsigned(sram_address)))   when sram_oe_n='0'
+    sram_data_rd <= 
+        X"00" & prom_output when sram_address(31 downto 27)="10110" else
+        sram_output;
+            
+
+
+    -- Do a very basic simulation of an external SRAM ---------------
+
+    sram_chip_addr <= sram_address(SRAM_ADDR_SIZE downto 1);
+
+    -- FIXME should add some verification of /WE 
+    sram_output <=
+        sram1(conv_integer(unsigned(sram_chip_addr))) &
+        sram0(conv_integer(unsigned(sram_chip_addr)))   when sram_oe_n='0'
         else (others => 'Z');
 
-    -- Do a very basic simulation of an external SRAM
-    simulated_sram:
+    simulated_sram_write:
     process(sram_byte_we_n, sram_address, sram_oe_n)
     begin
         -- Write cycle
         -- FIXME should add OE\ to write control logic
         if sram_byte_we_n'event or sram_address'event then
             if sram_byte_we_n(1)='0' then
-                sram1(conv_integer(unsigned(sram_address))) <= sram_databus(15 downto  8);
+                sram1(conv_integer(unsigned(sram_chip_addr))) <= sram_data_wr(15 downto  8);
             end if;
             if sram_byte_we_n(0)='0' then
-                sram0(conv_integer(unsigned(sram_address))) <= sram_databus( 7 downto  0);
+                sram0(conv_integer(unsigned(sram_chip_addr))) <= sram_data_wr( 7 downto  0);
             end if;            
         end if;
+    end process simulated_sram_write;
 
-        -- Read cycle
-        -- FIXME should add some verification of /WE 
-        --if sram_oe_n'event or sram_address'event then
-        --    if sram_oe_n='0' then
-        --        sram_databus <= 
-        --            sram1(conv_integer(unsigned(sram_address))) &
-        --            sram0(conv_integer(unsigned(sram_address)));
-        --    else
-        --        sram_databus <= (others => 'Z');
-        --    end if;
-        --end if;
-
-    end process simulated_sram;
 
     -- Do a very basic simulation of an external PROM wired to the same bus 
     -- as the sram (both are static).
---    prom_databus <=
---        prom(conv_integer(unsigned(sram_address))) when prom_oe_n='0'
---        else (others => 'Z');            
+    
+    prom_rd_addr <= sram_address(PROM_ADDR_SIZE+1 downto 2);
+    
+    prom_oe_n <= sram_oe_n;
+    
+    prom_output <=
+        prom(conv_integer(unsigned(prom_rd_addr)))(31 downto 24) when prom_oe_n='0' and sram_address(1 downto 0)="00" else
+        prom(conv_integer(unsigned(prom_rd_addr)))(23 downto 16) when prom_oe_n='0' and sram_address(1 downto 0)="01" else
+        prom(conv_integer(unsigned(prom_rd_addr)))(15 downto  8) when prom_oe_n='0' and sram_address(1 downto 0)="10" else
+        prom(conv_integer(unsigned(prom_rd_addr)))( 7 downto  0) when prom_oe_n='0' and sram_address(1 downto 0)="11" else
+        (others => 'Z');            
     
     
     simulated_io:
