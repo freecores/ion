@@ -149,7 +149,7 @@ function decode_addr_mips1(addr : t_addr_decode) return t_range_attr is
 begin
 
     case addr(31 downto 27) is 
-    when "00000"    => return (MT_SRAM_16B ,'1','1',"000"); -- useg
+    when "00000"    => return (MT_SRAM_16B ,'1','1',"001"); -- useg
     when "10000"    => return (MT_SRAM_16B ,'1','1',"000"); -- kseg0
     --when "10100"    => return (MT_IO_SYNC  ,'1','0',"000"); -- kseg1 i/o
     when "00100"    => return (MT_IO_SYNC  ,'1','0',"000"); -- kseg1 i/o
