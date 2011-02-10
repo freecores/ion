@@ -25,7 +25,7 @@
 -- External FPGA signals
 --
 -- This module has signals meant to connect directly to FPGA pins: the SRAM
--- interface. They are either direct register outputs or at most with an 
+-- interface. They are either direct register outputs or at most with an
 -- intervening 2-mux, in order to minimize the Tco (clock-to-output).
 --
 -- The Tco of these signals has to be accounted for in the real SRAM interface.
@@ -40,25 +40,25 @@
 -- 1.- All signals coming from the CPU are registered.
 -- 2.- All CPU inputs come directly from a register, or at most have a 2-mux in
 --     between.
--- 
--- This means this block will not degrade the timing performance of the system, 
+--
+-- This means this block will not degrade the timing performance of the system,
 -- as long as its logic is shallower than the current bottleneck (the ALU).
 --
 --------------------------------------------------------------------------------
 -- KNOWN TROUBLE:
--- 
+--
 -- Apart from the very rough looks of the code, there's a few known problems:
 --
 -- 1.- Write cycles too long
---      In order to guarantee setup and hold times for WE controlled write 
+--      In order to guarantee setup and hold times for WE controlled write
 --      cycles, two extra clock cycles are inserted for each SRAM write access.
 --      This is the most reliable way and the easiest but probably not the best.
 --      Until I come up with something better, write cycles to SRAM are going
 --      to be very slow.
--- 
+--
 -- 2.- Access to unmapped areas will crash the CPU
---      A couple states are missing in the state machine for handling accesses 
---      to unmapped areas. I haven't yet decided how to handle that (return 
+--      A couple states are missing in the state machine for handling accesses
+--      to unmapped areas. I haven't yet decided how to handle that (return
 --      zero, trigger trap, mirror another mapped area...).
 --
 -- 3.- Code refills from SRAM is unimplemented yet
@@ -134,32 +134,27 @@ architecture stub of mips_cache_stub is
 -- Wait state counter -- we're supporting static memory from 10 to >100 ns
 subtype t_wait_state_counter is std_logic_vector(2 downto 0);
 
--- state machines: definition of states -----------------------------
+-- State machine ----------------------------------------------------
 
-type t_code_cache_state is (
-    code_normal,                -- 
-    code_wait_for_dcache,       -- wait for D-cache to stop using the buses
+type t_cache_state is (
+    idle,                       -- Cache hitting, control machine idle
 
+    -- Code refill --------------------------------------------------
     code_refill_bram_0,         -- pc in bram_rd_addr
     code_refill_bram_1,         -- op in bram_rd
-    code_refill_bram_2,         -- op in code_rd 
+    code_refill_bram_2,         -- op in code_rd
 
-    code_refill_sram_0,         -- FIXME code refill from SRAM unimplemented
-    code_refill_sram_1,
-    code_refill_sram_2,
+    code_refill_sram_0,         -- rd addr in SRAM addr bus (low hword)
+    code_refill_sram_1,         -- rd addr in SRAM addr bus (high hword)
 
-    code_bug                    -- caught an error in the state machine
-   );
+    code_refill_sram8_0,        -- rd addr in SRAM addr bus (byte 0)
+    code_refill_sram8_1,        -- rd addr in SRAM addr bus (byte 1)
+    code_refill_sram8_2,        -- rd addr in SRAM addr bus (byte 2)
+    code_refill_sram8_3,        -- rd addr in SRAM addr bus (byte 3)
 
--- I-cache state machine state register & next state
-signal cps, cns :           t_code_cache_state;
--- Wait state counter, formally part of the state machine register
-signal code_wait_ctr :      t_wait_state_counter;
+    code_crash,                 -- tried to run from i/o or something like that
 
-
-type t_data_cache_state is (
-    data_normal,
-
+    -- Data refill & write-through ----------------------------------
     data_refill_sram_0,         -- rd addr in SRAM addr bus (low hword)
     data_refill_sram_1,         -- rd addr in SRAM addr bus (high hword)
 
@@ -170,10 +165,10 @@ type t_data_cache_state is (
 
     data_refill_bram_0,         -- rd addr in bram_rd_addr
     data_refill_bram_1,         -- rd data in bram_rd_data
-    
+
     data_read_io_0,             -- rd addr on io_rd_addr, io_vma active
     data_read_io_1,             -- rd data on io_rd_data
-    
+
     data_write_io_0,            -- wr addr & data in io_wr_*, io_byte_we active
 
     data_writethrough_sram_0a,  -- wr addr & data in SRAM buses (low hword)
@@ -182,21 +177,26 @@ type t_data_cache_state is (
     data_writethrough_sram_1a,  -- wr addr & data in SRAM buses (high hword)
     data_writethrough_sram_1b,  -- WE asserted
     data_writethrough_sram_1c,  -- WE deasserted
-    
+
     data_ignore_write,          -- hook for raising error flag FIXME untested
     data_ignore_read,           -- hook for raising error flag FIXME untested
 
-    data_bug                    -- caught an error in the state machine
+    -- Other states -------------------------------------------------
+
+    --code_wait_for_dcache,       -- wait for D-cache to stop using the buses
+    bug                         -- caught an error in the state machine
    );
 
-
--- D-cache state machine state register & next state
-signal dps, dns :           t_data_cache_state;
--- Wait state counter, formally part of the state machine register
-signal dws_ctr, dws :       t_wait_state_counter;
-signal load_dws_ctr :       std_logic;
-signal dws_wait_done :      std_logic;
-
+-- Cache state machine state register & next state
+signal ps, ns :             t_cache_state;
+-- Wait state down-counter, formally part of the state machine register
+signal ws_ctr :             t_wait_state_counter;
+-- Wait states for memory being accessed
+signal ws_value :           t_wait_state_counter;
+-- Asserted to initialize the wait state counter
+signal load_ws_ctr :        std_logic;
+-- Asserted when the wait state counter has reached zero
+signal ws_wait_done :       std_logic;
 
 
 -- CPU interface registers ------------------------------------------
@@ -262,215 +262,310 @@ signal data_wr_attr :       t_range_attr;
 begin
 
 --------------------------------------------------------------------------------
--- Cache control state machines 
+-- Cache control state machine
 
-cache_state_machine_regs:
+cache_state_machine_reg:
 process(clk)
 begin
    if clk'event and clk='1' then
         if reset='1' then
-            cps <= code_normal;
-            dps <= data_normal;
+            ps <= idle;
         else
-            cps <= cns;
-            dps <= dns;
+            ps <= ns;
         end if;
     end if;
-end process cache_state_machine_regs;
+end process cache_state_machine_reg;
 
--- (The code state machine occasionally 'waits' for the D-cache)
-code_state_machine_transitions:
-process(cps, dps, code_rd_vma, code_miss, code_rd_attr, 
+-- Unified control state machine for I-Cache and D-cache -----------------------
+control_state_machine_transitions:
+process(ps, code_rd_vma, code_miss, code_rd_attr, ws_wait_done,
         write_pending, read_pending)
 begin
-    case cps is
-    when code_normal =>
-        -- FIXME wrong logic, these signals are not active in the same cycle
-        if code_rd_vma='1' and code_miss='1' and 
-           read_pending='0' and write_pending='0' then
-            cns <= code_refill_bram_0; -- FIXME check memory area, SRAM!
-        else
-            cns <= cps;
-        end if;
-
-    when code_refill_bram_0 =>
-        cns <= code_refill_bram_1;
-
-    when code_refill_bram_1 =>
-        cns <= code_refill_bram_2;
-
-    when code_refill_bram_2 =>
-        if dps/=data_normal and read_pending='0' and write_pending='0' then
-            cns <= code_wait_for_dcache;
-        else
-            cns <= code_normal;
-        end if;
-        
-    when code_wait_for_dcache =>
-        -- if D-cache is busy, wait for it to become idle
-        if dps/=data_normal then
-            cns <= cps;
-        elsif code_miss='1' then
-            cns <= code_refill_bram_1; -- FIXME check memory area
-        else
-            cns <= code_normal;
-        end if;
-
-    when code_bug =>  
-        -- Something weird happened, we have 1 cycle to do something like raise
-        -- an error flag, etc. After 1 cycle, back to normal.
-        cns <= code_normal;
-
-    when others =>
-        -- We should never arrive here. If we do we handle it in state code_bug.
-        cns <= code_bug;
-    end case;
-end process code_state_machine_transitions;
-
-
--- This state machine does not overlap IO/BRAM/SRAM accesses for simplicity.
-
-data_state_machine_transitions:
-process(dps, write_pending, read_pending, 
-        data_rd_attr, data_wr_attr, dws_wait_done)
-begin
-    case dps is
-    when data_normal =>
-        if write_pending='1' then
-            case data_wr_attr.mem_type is
-            when MT_BRAM        => dns <= data_ignore_write;
-            when MT_SRAM_16B    => dns <= data_writethrough_sram_0a;
-            when MT_IO_SYNC     => dns <= data_write_io_0;
-            -- FIXME ignore write to undecoded area (clear pending flag)                        
-            when others         => dns <= dps; 
+    case ps is
+    when idle =>
+        if code_miss='1' then
+            case code_rd_attr.mem_type is
+            when MT_BRAM        => ns <= code_refill_bram_0;
+            when MT_SRAM_16B    => ns <= code_refill_sram_0;
+            when MT_SRAM_8B     => ns <= code_refill_sram8_0;
+            when others         => ns <= code_crash;
             end case;
-            
+
+        elsif write_pending='1' then
+            case data_wr_attr.mem_type is
+            when MT_BRAM        => ns <= data_ignore_write;
+            when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
+            when MT_IO_SYNC     => ns <= data_write_io_0;
+            -- FIXME ignore write to undecoded area (clear pending flag)
+            when others         => ns <= ps;
+            end case;
+
         elsif read_pending='1' then
             case data_rd_attr.mem_type is
-            when MT_BRAM        => dns <= data_refill_bram_0;
-            when MT_SRAM_16B    => dns <= data_refill_sram_0;
-            when MT_SRAM_8B     => dns <= data_refill_sram8_0;
-            when MT_IO_SYNC     => dns <= data_read_io_0;
-            -- FIXME ignore read from undecoded area (clear pending flag) 
-            when others         => dns <= data_ignore_read; 
+            when MT_BRAM        => ns <= data_refill_bram_0;
+            when MT_SRAM_16B    => ns <= data_refill_sram_0;
+            when MT_SRAM_8B     => ns <= data_refill_sram8_0;
+            when MT_IO_SYNC     => ns <= data_read_io_0;
+            -- FIXME ignore read from undecoded area (clear pending flag)
+            when others         => ns <= data_ignore_read;
             end case;
+
         else
-            dns <= dps;
+            ns <= ps;
         end if;
 
+
+    -- Code refill states -------------------------------------------
+
+    when code_refill_bram_0 =>
+        ns <= code_refill_bram_1;
+
+    when code_refill_bram_1 =>
+        ns <= code_refill_bram_2;
+
+    when code_refill_bram_2 =>
+        -- If there's a data operation pending, do it now
+        if write_pending='1' then
+            case data_wr_attr.mem_type is
+            when MT_BRAM        => ns <= data_ignore_write;
+            when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
+            when MT_IO_SYNC     => ns <= data_write_io_0;
+            -- FIXME ignore write to undecoded area (clear pending flag)
+            when others         => ns <= ps;
+            end case;
+
+        elsif read_pending='1' then
+            case data_rd_attr.mem_type is
+            when MT_BRAM        => ns <= data_refill_bram_0;
+            when MT_SRAM_16B    => ns <= data_refill_sram_0;
+            when MT_SRAM_8B     => ns <= data_refill_sram8_0;
+            when MT_IO_SYNC     => ns <= data_read_io_0;
+            -- FIXME ignore read from undecoded area (clear pending flag)
+            when others         => ns <= data_ignore_read;
+            end case;
+
+        else
+            ns <= idle;
+        end if;
+
+    when code_refill_sram_0 =>
+        if ws_wait_done='1' then
+            ns <= code_refill_sram_1;
+        else
+            ns <= ps;
+        end if;
+
+    when code_refill_sram_1 =>
+        if ws_wait_done='1' then
+            -- If there's a data operation pending, do it now
+            if write_pending='1' then
+                case data_wr_attr.mem_type is
+                when MT_BRAM        => ns <= data_ignore_write;
+                when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
+                when MT_IO_SYNC     => ns <= data_write_io_0;
+                -- FIXME ignore write to undecoded area (clear pending flag)
+                when others         => ns <= ps;
+                end case;
+
+            elsif read_pending='1' then
+                case data_rd_attr.mem_type is
+                when MT_BRAM        => ns <= data_refill_bram_0;
+                when MT_SRAM_16B    => ns <= data_refill_sram_0;
+                when MT_SRAM_8B     => ns <= data_refill_sram8_0;
+                when MT_IO_SYNC     => ns <= data_read_io_0;
+                -- FIXME ignore read from undecoded area (clear pending flag)
+                when others         => ns <= data_ignore_read;
+                end case;
+
+            else
+                ns <= idle;
+            end if;
+        else
+            ns <= ps;
+        end if;
+
+    when code_refill_sram8_0 =>
+        if ws_wait_done='1' then
+            ns <= code_refill_sram8_1;
+        else
+            ns <= ps;
+        end if;
+
+    when code_refill_sram8_1 =>
+        if ws_wait_done='1' then
+            ns <= code_refill_sram8_2;
+        else
+            ns <= ps;
+        end if;
+
+    when code_refill_sram8_2 =>
+        if ws_wait_done='1' then
+            ns <= code_refill_sram8_3;
+        else
+            ns <= ps;
+        end if;
+
+    when code_refill_sram8_3 =>
+        if ws_wait_done='1' then
+            -- If there's a data operation pending, do it now
+            if write_pending='1' then
+                case data_wr_attr.mem_type is
+                when MT_BRAM        => ns <= data_ignore_write;
+                when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
+                when MT_IO_SYNC     => ns <= data_write_io_0;
+                -- FIXME ignore write to undecoded area (clear pending flag)
+                when others         => ns <= ps;
+                end case;
+
+            elsif read_pending='1' then
+                case data_rd_attr.mem_type is
+                when MT_BRAM        => ns <= data_refill_bram_0;
+                when MT_SRAM_16B    => ns <= data_refill_sram_0;
+                when MT_SRAM_8B     => ns <= data_refill_sram8_0;
+                when MT_IO_SYNC     => ns <= data_read_io_0;
+                -- FIXME ignore read from undecoded area (clear pending flag)
+                when others         => ns <= data_ignore_read;
+                end case;
+
+            else
+                ns <= idle;
+            end if;
+        else
+            ns <= ps;
+        end if;
+
+    -- Data refill & write-through states ---------------------------
+
     when data_write_io_0 =>
-        dns <= data_normal;
-   
+        ns <= idle;
+
     when data_read_io_0 =>
-        dns <= data_read_io_1;
-   
+        ns <= data_read_io_1;
+
     when data_read_io_1 =>
-        dns <= data_normal;
+        ns <= idle;
 
     when data_refill_sram8_0 =>
-        if dws_wait_done='1' then
-            dns <= data_refill_sram8_1;
+        if ws_wait_done='1' then
+            ns <= data_refill_sram8_1;
         else
-            dns <= dps;
+            ns <= ps;
         end if;
 
     when data_refill_sram8_1 =>
-        if dws_wait_done='1' then
-            dns <= data_refill_sram8_2;
+        if ws_wait_done='1' then
+            ns <= data_refill_sram8_2;
         else
-            dns <= dps;
+            ns <= ps;
         end if;
 
     when data_refill_sram8_2 =>
-        if dws_wait_done='1' then
-            dns <= data_refill_sram8_3;
+        if ws_wait_done='1' then
+            ns <= data_refill_sram8_3;
         else
-            dns <= dps;
+            ns <= ps;
         end if;
 
     when data_refill_sram8_3 =>
-        if dws_wait_done='1' then
-            dns <= data_normal;
+        if ws_wait_done='1' then
+            ns <= idle;
         else
-            dns <= dps;
+            ns <= ps;
         end if;
 
     when data_refill_sram_0 =>
-        if dws_wait_done='1' then
-            dns <= data_refill_sram_1;
+        if ws_wait_done='1' then
+            ns <= data_refill_sram_1;
         else
-            dns <= dps;
+            ns <= ps;
         end if;
 
     when data_refill_sram_1 =>
-        if dws_wait_done='1' then
-            dns <= data_normal;
+        if ws_wait_done='1' then
+            ns <= idle;
         else
-            dns <= dps;
+            ns <= ps;
         end if;
 
     when data_refill_bram_0 =>
-        dns <= data_refill_bram_1;
+        ns <= data_refill_bram_1;
 
     when data_refill_bram_1 =>
-        dns <= data_normal;
+        ns <= idle;
 
     when data_writethrough_sram_0a =>
-        dns <= data_writethrough_sram_0b;
-        
+        ns <= data_writethrough_sram_0b;
+
     when data_writethrough_sram_0b =>
-        if dws_wait_done='1' then
-            dns <= data_writethrough_sram_0c;
+        if ws_wait_done='1' then
+            ns <= data_writethrough_sram_0c;
         else
-            dns <= dps;
+            ns <= ps;
         end if;
-    
+
     when data_writethrough_sram_0c =>
-        dns <= data_writethrough_sram_1a;
-    
+        ns <= data_writethrough_sram_1a;
+
     when data_writethrough_sram_1a =>
-        dns <= data_writethrough_sram_1b;
-    
+        ns <= data_writethrough_sram_1b;
+
     when data_writethrough_sram_1b =>
-        if dws_wait_done='1' then
-            dns <= data_writethrough_sram_1c;
+        if ws_wait_done='1' then
+            ns <= data_writethrough_sram_1c;
         else
-            dns <= dps;
-        end if;    
+            ns <= ps;
+        end if;
 
     when data_writethrough_sram_1c =>
-        dns <= data_normal;
-        
+        ns <= idle;
+
 
     when data_ignore_write =>
-        dns <= data_normal;
+        ns <= idle;
 
     when data_ignore_read =>
-        dns <= data_normal;
+        ns <= idle;
 
-    when data_bug =>
+    -- Exception states (something went wrong) ----------------------
+
+    when code_crash =>
+        -- Attempted to fetch from i/o area. This is a software bug, probably,
+        -- and should trigger a trap. We have 1 cycle to do something about it.
+        -- After this cycle, back to normal.
+        ns <= idle;
+
+    when bug =>
         -- Something weird happened, we have 1 cycle to do something like raise
-        -- an error flag, etc. After 1 cycle, back to normal.    
-        dns <= data_normal;
+        -- an error flag, etc. After 1 cycle, back to normal.
+        ns <= idle;
 
     when others =>
-        -- Should never arrive here. If we do, we handle it in state data_bug.
-        dns <= data_bug;
+        -- We should never arrive here. If we do we handle it in state bug.
+        ns <= bug;
     end case;
-end process data_state_machine_transitions;
+end process control_state_machine_transitions;
 
-load_dws_ctr <= '1' when 
-    (dns=data_refill_sram_0 and dps/=data_refill_sram_0) or
-    (dns=data_refill_sram_1 and dps/=data_refill_sram_1) or
-    (dns=data_refill_sram8_0 and dps/=data_refill_sram8_0) or
-    (dns=data_refill_sram8_1 and dps/=data_refill_sram8_1) or
-    (dns=data_refill_sram8_2 and dps/=data_refill_sram8_2) or
-    (dns=data_refill_sram8_3 and dps/=data_refill_sram8_3) or
-    (dns=data_writethrough_sram_0a) or 
-    (dns=data_writethrough_sram_1a) 
+-- load wait state counter when we're entering the state we will wait on
+load_ws_ctr <= '1' when
+    (ns=code_refill_sram_0  and ps/=code_refill_sram_0) or
+    (ns=code_refill_sram_1  and ps/=code_refill_sram_1) or
+    (ns=code_refill_sram8_0 and ps/=code_refill_sram8_0) or
+    (ns=code_refill_sram8_1 and ps/=code_refill_sram8_1) or
+    (ns=code_refill_sram8_2 and ps/=code_refill_sram8_2) or
+    (ns=code_refill_sram8_3 and ps/=code_refill_sram8_3) or
+    (ns=data_refill_sram_0  and ps/=data_refill_sram_0) or
+    (ns=data_refill_sram_1  and ps/=data_refill_sram_1) or
+    (ns=data_refill_sram8_0 and ps/=data_refill_sram8_0) or
+    (ns=data_refill_sram8_1 and ps/=data_refill_sram8_1) or
+    (ns=data_refill_sram8_2 and ps/=data_refill_sram8_2) or
+    (ns=data_refill_sram8_3 and ps/=data_refill_sram8_3) or
+    (ns=data_writethrough_sram_0a) or
+    (ns=data_writethrough_sram_1a)
     else '0';
 
-with dns select dws <= 
+
+-- select the wait state counter value as that of read address or write address
+with ns select ws_value <=
     data_rd_attr.wait_states    when data_refill_sram_0,
     data_rd_attr.wait_states    when data_refill_sram_1,
     data_rd_attr.wait_states    when data_refill_sram8_0,
@@ -479,27 +574,34 @@ with dns select dws <=
     data_rd_attr.wait_states    when data_refill_sram8_3,
     data_wr_attr.wait_states    when data_writethrough_sram_0a,
     data_wr_attr.wait_states    when data_writethrough_sram_1a,
+    code_rd_attr.wait_states    when code_refill_sram_0,
+    code_rd_attr.wait_states    when code_refill_sram_1,
+    code_rd_attr.wait_states    when code_refill_sram8_0,
+    code_rd_attr.wait_states    when code_refill_sram8_1,
+    code_rd_attr.wait_states    when code_refill_sram8_2,
+    code_rd_attr.wait_states    when code_refill_sram8_3,
     data_wr_attr.wait_states    when others;
-    
-data_wait_state_counter:
+
+
+wait_state_counter_reg:
 process(clk)
 begin
     if clk'event and clk='1' then
         if reset='1' then
-            dws_ctr <= (others => '0');
+            ws_ctr <= (others => '0');
         else
-            if load_dws_ctr='1' then
-                dws_ctr <= dws;
-            elsif dws_wait_done='0' then
-                dws_ctr <= dws_ctr - 1;
+            if load_ws_ctr='1' then
+                ws_ctr <= ws_value;
+            elsif ws_wait_done='0' then
+                ws_ctr <= ws_ctr - 1;
             end if;
         end if;
     end if;
-end process data_wait_state_counter;
+end process wait_state_counter_reg;
 
-dws_wait_done <= '1' when dws_ctr="000" else '0';
+ws_wait_done <= '1' when ws_ctr="000" else '0';
 
-    
+
 --------------------------------------------------------------------------------
 -- CPU interface registers and address decoding --------------------------------
 
@@ -516,35 +618,35 @@ begin
             read_pending <= '0';
             byte_we_reg <= "0000";
         else
-            -- Raise 'read_pending' at the 1st cycle of a read, clear it when
+            -- Raise 'read_pending' at 1st cycle of a data read, clear it when
             -- the read (and/or refill) operation has been done.
             -- data_rd_addr_reg always has the addr of any pending read
             if data_rd_vma='1' then
                 read_pending <= '1';
                 data_rd_addr_reg <= data_rd_addr(31 downto 2);
-            elsif dps=data_refill_sram_1 or 
-                  dps=data_refill_sram8_3 or  
-                  dps=data_refill_bram_1 or 
-                  dps=data_read_io_0 or
-                  dps=data_ignore_read then
+            elsif ps=data_refill_sram_1 or
+                  ps=data_refill_sram8_3 or
+                  ps=data_refill_bram_1 or
+                  ps=data_read_io_0 or
+                  ps=data_ignore_read then
                 read_pending <= '0';
             end if;
 
-            -- Raise 'write_pending' at the 1st cycle of a read, clear it when
+            -- Raise 'write_pending' at the 1st cycle of a write, clear it when
             -- the write (writethrough actually) operation has been done.
             -- data_wr_addr_reg always has the addr of any pending write
-            if byte_we/="0000" and dps=data_normal then
+            if byte_we/="0000" and ps=idle then
                 byte_we_reg <= byte_we;
                 data_wr_reg <= data_wr;
                 data_wr_addr_reg <= data_wr_addr;
                 write_pending <= '1';
-            elsif dps=data_writethrough_sram_1b or
-                  dps=data_write_io_0 or
-                  dps=data_ignore_write then
+            elsif ps=data_writethrough_sram_1b or
+                  ps=data_write_io_0 or
+                  ps=data_ignore_write then
                 write_pending <= '0';
                 byte_we_reg <= "0000";
             end if;
-            
+
         end if;
     end if;
 end process cpu_data_interface_registers;
@@ -555,8 +657,7 @@ begin
     if clk'event and clk='1' then
         -- Register code fetch addresses only when they are valid; so that
         -- code_rd_addr_reg always holds the last fetch address.
-        if (cps=code_normal and code_rd_vma='1') or 
-            cps=code_refill_bram_2 then -- FIXME explain this term
+        if code_rd_vma='1' then
             code_rd_addr_reg <= code_rd_addr;
         end if;
     end if;
@@ -583,18 +684,19 @@ data_wr_attr <= decode_addr(data_wr_addr_mask);
 -- BRAM interface
 
 
--- BRAMm address can come from code or data buses
+-- BRAM address can come from code or data buses
 -- (note both inputs to this mux are register outputs)
-bram_rd_addr <= 
-    data_rd_addr_reg(bram_rd_addr'high downto 2) when dps=data_refill_bram_0
-    else code_rd_addr_reg(bram_rd_addr'high downto 2) ;
+bram_rd_addr <=
+    data_rd_addr_reg(bram_rd_addr'high downto 2)
+        when ps=data_refill_bram_0 else
+    code_rd_addr_reg(bram_rd_addr'high downto 2) ;
 
-bram_data_rd_vma <= '1' when dps=data_refill_bram_1 else '0';
+bram_data_rd_vma <= '1' when ps=data_refill_bram_1 else '0';
 
 
 
 --------------------------------------------------------------------------------
--- Code cache 
+-- Code cache
 
 -- All the tag match logic is unfinished and will be simplified away in synth.
 
@@ -602,7 +704,16 @@ bram_data_rd_vma <= '1' when dps=data_refill_bram_1 else '0';
 code_rd <= code_cache_rd;
 
 -- FIXME Actual 1-word cache functionality is unimplemented yet
-code_miss <= '1'; -- always miss
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            code_miss <= '0';
+        else
+            code_miss <= code_rd_vma; -- always miss
+        end if;
+    end if;
+end process;
 
 -- Read cache code and tag from code store
 code_cache_rd <= code_cache_store;
@@ -612,8 +723,6 @@ code_cache_memory:
 process(clk)
 begin
     if clk'event and clk='1' then
-
-
         if reset='1' then
             -- in the real hardware the tag store can't be reset and it's up
             -- to the SW to initialize the cache.
@@ -621,14 +730,14 @@ begin
             code_cache_store <= (others => '0');
         else
             -- Refill cache if necessary
-            if cps=code_refill_bram_1 then
+            if ps=code_refill_bram_1 then
                 code_cache_tag_store <=
                     "01" & code_rd_addr_reg(t_code_tag'high-2 downto t_code_tag'low);
                 code_cache_store <= bram_rd_data;
-            --elsif cps=code_refill_sram_2 then
-            --    code_cache_tag_store <=
-            --        "01" & code_rd_addr_reg(t_code_tag'high-2 downto t_code_tag'low);
-            --    code_cache_store <= sram_rd_data;
+            elsif ps=code_refill_sram_1 or ps=code_refill_sram8_3 then
+                code_cache_tag_store <=
+                    "01" & code_rd_addr_reg(t_code_tag'high-2 downto t_code_tag'low);
+                code_cache_store <= sram_rd_data;
             end if;
         end if;
     end if;
@@ -639,8 +748,8 @@ end process code_cache_memory;
 -- Data cache
 
 -- CPU data input mux: direct cache output OR uncached io input
-with dps select data_rd <= 
-    io_rd_data      when data_read_io_1,    
+with ps select data_rd <=
+    io_rd_data      when data_read_io_1,
     data_cache_rd   when others;
 
 -- All the tag match logic is unfinished and will be simplified away in synth.
@@ -659,14 +768,14 @@ begin
             data_cache_store <= (others => '0');
         else
             -- Refill data cache if necessary
-            if dps=data_refill_sram_1 or dps=data_refill_sram8_3 then
+            if ps=data_refill_sram_1 or ps=data_refill_sram8_3 then
                 data_cache_tag_store <=
                     "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
                 data_cache_store <= sram_rd_data;
-            elsif dps=data_refill_bram_1 then
+            elsif ps=data_refill_bram_1 then
                 data_cache_tag_store <=
                     "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
-                data_cache_store <= bram_rd_data;            
+                data_cache_store <= bram_rd_data;
             end if;
         end if;
     end if;
@@ -676,88 +785,100 @@ end process data_cache_memory;
 --------------------------------------------------------------------------------
 -- SRAM interface
 
--- Note this signals are meantto be connected directly to FPGA pins (and then
+-- Note this signals are meant to be connected directly to FPGA pins (and then
 -- to a SRAM, of course). They are the only signals whose tco we care about.
 
 -- FIXME should add a SRAM CE\ signal
 
 -- SRAM address bus (except for LSB) comes from cpu code or data addr registers
-with dps select sram_address(sram_address'high downto 2) <=
-    data_rd_addr_reg(sram_address'high downto 2)    when data_refill_sram_0 |
-                                                         data_refill_sram_1 |
-                                                         data_refill_sram8_0 |
-                                                         data_refill_sram8_1 |
-                                                         data_refill_sram8_2 |
-                                                         data_refill_sram8_3,
-    data_wr_addr_reg(sram_address'high downto 2)    when others;
+
+sram_address(sram_address'high downto 2) <=
+    data_rd_addr_reg(sram_address'high downto 2)
+        when   (ps=data_refill_sram_0  or ps=data_refill_sram_1 or
+                ps=data_refill_sram8_0 or ps=data_refill_sram8_1 or
+                ps=data_refill_sram8_2 or ps=data_refill_sram8_3) else
+    code_rd_addr_reg(sram_address'high downto 2)
+        when   (ps=code_refill_sram_0  or ps=code_refill_sram_1 or
+                ps=code_refill_sram8_0 or ps=code_refill_sram8_1 or
+                ps=code_refill_sram8_2 or ps=code_refill_sram8_3) else
+    data_wr_addr_reg(sram_address'high downto 2);
 
 -- SRAM addr bus LSB depends on the D-cache state because we read/write the
 -- halfwords sequentially in successive cycles.
-with dps select sram_address(1) <=
-    '0'     when data_writethrough_sram_0a,
-    '0'     when data_writethrough_sram_0b,
-    '0'     when data_writethrough_sram_0c,
-    '1'     when data_writethrough_sram_1a,
-    '1'     when data_writethrough_sram_1b,
-    '1'     when data_writethrough_sram_1c,
-    '0'     when data_refill_sram8_0,
-    '0'     when data_refill_sram8_1,
-    '1'     when data_refill_sram8_2,
-    '1'     when data_refill_sram8_3,
-    '0'     when data_refill_sram_0,
-    '1'     when data_refill_sram_1,
-    '0'     when others;
+sram_address(1) <=
+    '0'     when   (ps=data_writethrough_sram_0a or
+                    ps=data_writethrough_sram_0b or
+                    ps=data_writethrough_sram_0c or
+                    ps=data_refill_sram8_0 or
+                    ps=data_refill_sram8_1 or
+                    ps=data_refill_sram_0 or
+                    ps=code_refill_sram8_0 or
+                    ps=code_refill_sram8_1 or
+                    ps=code_refill_sram_0) else
+    '1'     when   (ps=data_writethrough_sram_1a or
+                    ps=data_writethrough_sram_1b or
+                    ps=data_writethrough_sram_1c or
+                    ps=data_refill_sram8_2 or
+                    ps=data_refill_sram8_3 or
+                    ps=data_refill_sram_1 or
+                    ps=code_refill_sram8_2 or
+                    ps=code_refill_sram8_3 or
+                    ps=code_refill_sram_1)
+    else '0';
 
--- The lowest addr bit will only be used when accessing byte-wide memory
-with dps select sram_address(0) <=
-    '0'     when data_refill_sram8_0 | data_refill_sram8_2,
-    '1'     when others;
-    
+-- The lowest addr bit will only be used when accessing byte-wide memory, and
+-- even when we're reading word-aligned code (we need to read the four bytes)
+sram_address(0) <=
+    '0'     when (ps=data_refill_sram8_0 or ps=data_refill_sram8_2 or
+                  ps=code_refill_sram8_0 or ps=code_refill_sram8_2) else
+    '1';
 
--- SRAM databus i(when used for output) comes from either hword of the data
+
+-- SRAM databus (when used for output) comes from either hword of the data
 -- write register.
-with dps select sram_data_wr <=
+with ps select sram_data_wr <=
     data_wr_reg(31 downto 16)   when data_writethrough_sram_0a,
     data_wr_reg(31 downto 16)   when data_writethrough_sram_0b,
     data_wr_reg(31 downto 16)   when data_writethrough_sram_0c,
     data_wr_reg(15 downto  0)   when data_writethrough_sram_1a,
     data_wr_reg(15 downto  0)   when data_writethrough_sram_1b,
-    data_wr_reg(15 downto  0)   when data_writethrough_sram_1c,    
+    data_wr_reg(15 downto  0)   when data_writethrough_sram_1c,
     (others => 'Z')             when others;
 
 -- The byte_we is split in two similarly.
-with dps select sram_byte_we_n <=
+with ps select sram_byte_we_n <=
     not byte_we_reg(3 downto 2) when data_writethrough_sram_0b,
     not byte_we_reg(1 downto 0) when data_writethrough_sram_1b,
     "11"                        when others;
 
 -- SRAM OE\ is only asserted low for read cycles
-with dps select sram_oe_n <=
-    '0' when data_refill_sram_0 |
-             data_refill_sram_1 |
-             data_refill_sram8_0 |
-             data_refill_sram8_1 |
-             data_refill_sram8_2 |
-             data_refill_sram8_3,
-    '1' when others;
+sram_oe_n <=
+    '0' when   (ps=data_refill_sram_0  or ps=data_refill_sram_1 or
+                ps=data_refill_sram8_0 or ps=data_refill_sram8_1 or
+                ps=data_refill_sram8_2 or ps=data_refill_sram8_3 or
+                ps=code_refill_sram_0  or ps=code_refill_sram_1 or
+                ps=code_refill_sram8_0 or ps=code_refill_sram8_1 or
+                ps=code_refill_sram8_2 or ps=code_refill_sram8_3) else
+    '1';
 
--- When eading from the SRAM, read word comes from read hword register and 
+-- When reading from the SRAM, read word comes from read hword register and
 -- SRAM bus (read register is loaded in previous cycle).
-with dps select sram_rd_data <= 
-    sram_rd_data_reg & sram_data_rd(7 downto 0)     when data_refill_sram8_3,
-    sram_rd_data_reg(31 downto 16) & sram_data_rd   when others;
+sram_rd_data <=
+    sram_rd_data_reg & sram_data_rd(7 downto 0)
+            when ps=data_refill_sram8_3 or ps=code_refill_sram8_3 else
+    sram_rd_data_reg(31 downto 16) & sram_data_rd;
 
 sram_input_halfword_register:
 process(clk)
 begin
     if clk'event and clk='1' then
-        if dps=data_refill_sram_0 then
+        if ps=data_refill_sram_0 or ps=code_refill_sram_0 then
             sram_rd_data_reg(31 downto 16) <= sram_data_rd;
-        elsif dps=data_refill_sram8_0 then
+        elsif ps=data_refill_sram8_0 or ps=code_refill_sram8_0 then
             sram_rd_data_reg(31 downto 24) <= sram_data_rd(7 downto 0);
-        elsif dps=data_refill_sram8_1 then
+        elsif ps=data_refill_sram8_1 or ps=code_refill_sram8_1 then
             sram_rd_data_reg(23 downto 16) <= sram_data_rd(7 downto 0);
-        elsif dps=data_refill_sram8_2 then
+        elsif ps=data_refill_sram8_2 or ps=code_refill_sram8_2 then
             sram_rd_data_reg(15 downto  8) <= sram_data_rd(7 downto 0);
         end if;
     end if;
@@ -767,31 +888,36 @@ end process sram_input_halfword_register;
 --------------------------------------------------------------------------------
 -- I/O interface -- IO is assumed to behave like synchronous memory
 
-io_byte_we <= byte_we_reg when dps=data_write_io_0 else "0000";
+io_byte_we <= byte_we_reg when ps=data_write_io_0 else "0000";
 io_rd_addr <= data_rd_addr_reg;
 io_wr_addr <= data_wr_addr_reg;
 io_wr_data <= data_wr_reg;
-io_rd_vma <= '1' when dps=data_read_io_0 else '0';
+io_rd_vma <= '1' when ps=data_read_io_0 else '0';
 
 
 --------------------------------------------------------------------------------
 -- CPU stall control
 
 -- Stall the CPU when either state machine needs it
-mem_wait <= (code_wait or data_wait) and not reset;
+mem_wait <= (code_wait or data_wait or code_miss) and not reset; -- FIXME
 
 -- Assert code_wait until the cycle where the CPU has valid code word on its
 -- code bus
-with cps select code_wait <=
+with ps select code_wait <=
     '1' when code_refill_bram_0,
     '1' when code_refill_bram_1,
     '1' when code_refill_bram_2,
-    '1' when code_wait_for_dcache,
+    '1' when code_refill_sram_0,
+    '1' when code_refill_sram_1,
+    '1' when code_refill_sram8_0,
+    '1' when code_refill_sram8_1,
+    '1' when code_refill_sram8_2,
+    '1' when code_refill_sram8_3,
     '0' when others;
 
--- Assert code_wait until the cycle where the CPU has valid data word on its
+-- Assert data_wait until the cycle where the CPU has valid data word on its
 -- code bus AND no other operations are ongoing that may use the external buses.
-with dps select data_wait <=
+with ps select data_wait <=
     '1' when data_writethrough_sram_0a,
     '1' when data_writethrough_sram_0b,
     '1' when data_writethrough_sram_0c,
