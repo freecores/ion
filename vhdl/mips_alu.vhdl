@@ -61,7 +61,7 @@ with ac.neg_sel select inp2_neg <=
 
 sex1 <= inp1(31) when ac.arith_unsigned='0' else '0';
 alu_eop1 <= sex1 & inp1;
-sex2 <= inp2_neg(31) when ac.arith_unsigned='0' else '0';
+sex2 <= inp2_neg(31) when (ac.arith_unsigned='0' or ac.use_slt='1') else '0';
 alu_eop2 <= sex2 & inp2_neg;
 alu_arith <= alu_eop1 + alu_eop2 + ac.cy_in;
 
