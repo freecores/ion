@@ -19,8 +19,8 @@ clean:
 	-$(RM) *.o *.obj *.map *.lst *.hex *.exe *.axf *.code *.data
 
 hello: hello.c
-	$(AS_MIPS) -o startup.o $(SRC_DIR)/common/startup.s
-	$(GCC_MIPS) $(CFLAGS) -o baremetal.o $(SRC_DIR)/common/baremetal.c
+	$(AS_MIPS) -o startup.o --defsym RUN_FROM_BRAM=1 $(SRC_DIR)/common/startup.s
+	$(GCC_MIPS) $(CFLAGS) -DRUN_FROM_BRAM -o baremetal.o $(SRC_DIR)/common/baremetal.c
 	$(GCC_MIPS) -o hello.o hello.c
 	$(LD_MIPS) $(LFLAGS) -Map hello.map -s -N -o hello.axf startup.o hello.o baremetal.o 
 	-@$(DUMP_MIPS) -m mips --disassemble hello.axf > hello.lst
