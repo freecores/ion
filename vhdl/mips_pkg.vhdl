@@ -124,8 +124,8 @@ package body mips_pkg is
 function log2(A : natural) return natural is
 begin
     for I in 1 to 30 loop -- Works for up to 32 bit integers
-        if(2**I > A) then 
-            return(I-1);
+        if(2**I >= A) then 
+            return(I);
         end if;
     end loop;
     return(30);
