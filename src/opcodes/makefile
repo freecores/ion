@@ -3,7 +3,7 @@
 include ../common/makefile
 
 # We'll run the simulation for long enough for the program to finish
-SIM_LENGTH = 5000
+SIM_LENGTH = 10000
 	
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
@@ -33,7 +33,7 @@ opcodes:
 	
 # Create VHDL file for simulation test bench from TB2 template
 opcodes_sim: opcodes
-	$(TO_VHDL) --code opcodes.bin --data opcodes.data \
+	$(TO_VHDL) --code opcodes.bin --data opcodes.data --log_trigger=0xbfc00000 \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(DATA_BRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2

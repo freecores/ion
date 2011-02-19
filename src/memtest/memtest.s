@@ -115,13 +115,41 @@ end_test:                       # test done, ramtop+4 in $t0, #KB in $t4
     nop
     addi    $a0,$t0,-4          # substract the +4 offset we added before
     move    $sp,$t0             # init SP at the top of RAM space
-    addi    $sp,$sp,-4
+    addi    $sp,$sp,-16
     li      $a1,8
     jal     put_hex
     nop
     la      $a0,crlf
     jal     puts
     nop
+    
+    # Test code execution from SRAM. We copy the test_exec_sram routine to 
+    # the base of the SRAM and then jal to it
+    li      $a1,64
+    li      $a0,XRAM_BASE
+    la      $a3,test_exec_sram
+copy_to_sram:
+    lw      $a2,0($a3)
+    nop
+    sw      $a2,0($a0)
+    addi    $a1,$a1,-4
+    addi    $a3,$a3,4
+    bnez    $a1,copy_to_sram
+    addi    $a0,$a0,4
+    
+    .ifgt 0
+    li      $a0,0
+    jal     dump_hex
+    ori     $a1,$zero,16
+    .endif
+    
+    li      $a0,XRAM_BASE
+    jalr    $a0
+    nop
+    
+    .ifgt   0
+    # If all went well in the SRAM we'll have returned here
+ 
     
     # FIXME now we should so some strong test on the RAM to see if it's wired
     # correctly, using the right timing, etc.
@@ -150,11 +178,27 @@ end_test:                       # test done, ramtop+4 in $t0, #KB in $t4
     li      $a0,0xb0000000
     jal     dump_hex
     ori     $a1,$zero,24
-   
+    .endif
     
 $DONE:
     j       $DONE               # ...and freeze here
     nop
+
+
+test_exec_sram:
+    #jr      $ra
+    #nop
+    sw      $ra,0($sp)
+    addi    $sp,$sp,-4
+    la      $a0,msg3
+    la      $a1,puts
+    jalr    $a1
+    nop
+    lw      $ra,4($sp)
+    jr      $ra
+    addi    $sp,$sp,4
+test_exec_sram_end:
+
 
 
 #---- Functions ----------------------------------------------------------------
@@ -258,6 +302,9 @@ msg_bad:
     .asciz "bad readback!\n\r"
 msg2:
     .asciz "\n\rDumping the first few words of FLASH at address 0x"
+msg3:
+    .ascii "\n\rTesting code execution from SRAM...  "
+    .asciz "if you see this, it worked\n\r"
     
     .set    reorder
     .end    entry

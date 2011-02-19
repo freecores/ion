@@ -18,11 +18,11 @@ LFLAGS = -Ttext $(BRAM_START) -Tdata $(XRAM_START) -eentry -I elf32-big
 clean:
 	-$(RM) *.o *.obj *.map *.lst *.hex *.exe *.axf *.code *.data
 
-hello:
-	$(AS_MIPS) -o boot.o $(SRC_DIR)/common/boot.s
-	$(GCC_MIPS) -o no_os.o $(SRC_DIR)/common/no_os.c
+hello: hello.c
+	$(AS_MIPS) -o startup.o $(SRC_DIR)/common/startup.s
+	$(GCC_MIPS) $(CFLAGS) -o baremetal.o $(SRC_DIR)/common/baremetal.c
 	$(GCC_MIPS) -o hello.o hello.c
-	$(LD_MIPS) $(LFLAGS) -Map hello.map -s -N -o hello.axf boot.o hello.o no_os.o 
+	$(LD_MIPS) $(LFLAGS) -Map hello.map -s -N -o hello.axf startup.o hello.o baremetal.o 
 	-@$(DUMP_MIPS) -m mips --disassemble hello.axf > hello.lst
 # Extract object code to be placed in code space
 	$(COPY_MIPS) -I elf32-big -O binary hello.axf hello.code

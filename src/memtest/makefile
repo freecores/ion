@@ -5,14 +5,14 @@
 include ..\\common\\makefile
 	
 # We'll run the simulation for long enough to complete the test
-SIM_LENGTH = 20000
+SIM_LENGTH = 30000
 
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
 CODE_BRAM_SIZE = 2048
 # External RAM parameters (size in words)
 XRAM_SIZE = 1024
-XRAM_START = 0x00000000	
+XRAM_START = 0x00000000
 
 
 LFLAGS = -Ttext $(BRAM_START) -Tdata $(XRAM_START) -eentry -I elf32-big

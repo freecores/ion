@@ -1214,6 +1214,187 @@ ShiftTest:
     sb      $23,0($20)
     sb      $21,0($20)
 
+    # These tests are to be evaluated by matching logs with the software 
+    # simulator. There is no need to perform any actual tests here, if there is 
+    # any error it will show up as a mismatch in the logs.
+
+    #-- Arithmetic --------------------------------------------------
+    ori     $s0,$zero,0xa5a5
+    ori     $s1,$zero,15
+    ori     $s2,$zero,1
+    li      $s3,-1
+    li      $s4,-1000
+    li      $s5,0x80000000
+    li      $s6,0x7fffffff
+    
+    #-- ADD ---------------------------
+    move    $t0,$s0                     # P + P = P
+    move    $t1,$s1
+    add     $t0,$t1,$s1
+    move    $t0,$s0                     # P + N = P
+    move    $t1,$s1
+    add     $t0,$t1,$s3
+    move    $t0,$s0                     # P + N = N
+    move    $t1,$s1
+    add     $t0,$t1,$s4
+    move    $t0,$s0                     # P + P = N (overflow)
+    move    $t1,$s6
+    add     $t0,$t1,$s6
+    move    $t0,$s0                     # N + N = P (overflow)
+    move    $t1,$s5
+    add     $t0,$t1,$s5
+    
+    #-- ADDI --------------------------
+    move    $t0,$s0                     # N + N = P (overflow)
+    move    $t1,$s5
+    addi    $t0,$t1,-1
+    move    $t0,$s0                     # N + P = N
+    move    $t1,$s5
+    addi    $t0,$t1,15
+    move    $t0,$s0                     # N + P = P
+    move    $t1,$s3
+    addi    $t0,$t1,2
+    move    $t0,$s0                     # P + P = P
+    move    $t1,$s1
+    addi    $t0,$t1,2
+    move    $t0,$s0                     # P + P = N (overflow)
+    move    $t1,$s6
+    addi    $t0,$t1,2
+
+    #-- ADDIU -------------------------
+    move    $t0,$s0                     # N + N = P (overflow)
+    move    $t1,$s5
+    addiu   $t0,$t1,-1
+    move    $t0,$s0                     # N + P = N
+    move    $t1,$s5
+    addiu   $t0,$t1,15
+    move    $t0,$s0                     # N + P = P
+    move    $t1,$s3
+    addiu   $t0,$t1,2
+    move    $t0,$s0                     # P + P = P
+    move    $t1,$s1
+    addiu   $t0,$t1,2
+    move    $t0,$s0                     # P + P = N (overflow)
+    move    $t1,$s6
+    addiu   $t0,$t1,2
+
+    #-- ADDU --------------------------
+    move    $t0,$s0                     # P + P = P
+    move    $t1,$s1
+    addu    $t0,$t1,$s1
+    move    $t0,$s0                     # P + N = P
+    move    $t1,$s1
+    addu    $t0,$t1,$s3
+    move    $t0,$s0                     # P + N = N
+    move    $t1,$s1
+    addu    $t0,$t1,$s4
+    move    $t0,$s0                     # P + P = N (overflow)
+    move    $t1,$s6
+    addu    $t0,$t1,$s6
+    move    $t0,$s0                     # N + N = P (overflow)
+    move    $t1,$s5
+    addu    $t0,$t1,$s5    
+
+    #-- SUB ---------------------------
+    move    $t0,$s0                     # P - P = P
+    move    $t1,$s2
+    sub     $t0,$t1,$s1
+    move    $t0,$s0                     # P - N = P
+    move    $t1,$s1
+    add     $t0,$t1,$s3
+    move    $t0,$s0                     # P + N = N
+    move    $t1,$s1
+    add     $t0,$t1,$s4
+    move    $t0,$s0                     # P + P = N (overflow)
+    move    $t1,$s6
+    add     $t0,$t1,$s6
+    move    $t0,$s0                     # N + N = P (overflow)
+    move    $t1,$s5
+    add     $t0,$t1,$s5
+
+    # SLT, SLTI, SLTIU
+    ori     $a2,$zero,0xa5a5
+    ori     $a0,$zero,15
+    ori     $a1,$zero,1
+    move    $v0,$a3
+    slt     $v0,$a0,$a1
+    move    $v0,$a3
+    slt     $v0,$a1,$a0
+    move    $v0,$a3
+    slti    $v0,$a0,1
+    move    $v0,$a3
+    slti    $v0,$a1,15
+    move    $v0,$a3
+    sltiu   $v0,$a0,1
+    move    $v0,$a3
+    sltiu   $v0,$a1,15
+    li      $a1,0xa5a5
+    li      $a0,1029
+    addiu   $a0,$a0,-2000
+    sltu    $a1,$a0,1000
+
+
+    #-- Relative jumps ----------------------------------------------
+    li      $s0,0x7fffffff
+    ori     $s1,1000
+    ori     $s1,15
+    ori     $s1,2
+    li      $s4,0x80000000
+    li      $s5,-1001
+    li      $s6,-16
+    li      $s7,-3
+    
+    bgtz    $s1,test_b0
+    nop
+    ori     $v0,0x5500
+test_b0:
+    bgtz    $s7,test_b1
+    nop
+    ori     $v0,0x5501
+test_b1:
+    bgtz    $s0,test_b2
+    nop
+    ori     $v0,0x5502
+test_b2:
+    bgtz    $s4,test_b3
+    nop
+    ori     $v0,0x5503
+test_b3:
+    bgez    $s1,test_b4
+    nop
+    ori     $v0,0x5500
+test_b4:
+    bgez    $s7,test_b5
+    nop
+    ori     $v0,0x5501
+test_b5:
+    bgez    $s0,test_b6
+    nop
+    ori     $v0,0x5502
+test_b6:
+    bgez    $s4,test_b7
+    nop
+    ori     $v0,0x5503
+test_b7:
+    bltz    $s1,test_b8
+    nop
+    ori     $v0,0x5500
+test_b8:
+    bltz    $s7,test_b9
+    nop
+    ori     $v0,0x5501
+test_b9:
+    bltz    $s0,test_b10
+    nop
+    ori     $v0,0x5502
+test_b10:
+    bltz    $s4,test_b11
+    nop
+    ori     $v0,0x5503
+test_b11:
+
+    
+
  
 $DONE:
     j       $DONE
