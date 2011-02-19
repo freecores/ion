@@ -14,7 +14,6 @@
 -- and all outputs are registered (tco should be minimal).
 -- SRAM data inputs are NOT registered, though. They go through a couple muxes
 -- before reaching the first register so watch out for tsetup.
--- The SRAM is assumed to be fast enough to read or write in a clock cycle.
 --
 -- Obviously this module provides no performance gain; on the contrary, by
 -- coupling the CPU to slow external memory (16 bit bus) it actually slows it
@@ -278,7 +277,9 @@ end process cache_state_machine_reg;
 
 -- Unified control state machine for I-Cache and D-cache -----------------------
 control_state_machine_transitions:
-process(ps, code_rd_vma, code_miss, code_rd_attr, ws_wait_done,
+process(ps, code_rd_vma, code_miss, 
+        data_wr_attr.mem_type, data_rd_attr.mem_type, code_rd_attr.mem_type, 
+        ws_wait_done,
         write_pending, read_pending)
 begin
     case ps is
@@ -414,7 +415,7 @@ begin
                 when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
                 when MT_IO_SYNC     => ns <= data_write_io_0;
                 -- FIXME ignore write to undecoded area (clear pending flag)
-                when others         => ns <= ps;
+                when others         => ns <= data_ignore_write;
                 end case;
 
             elsif read_pending='1' then
