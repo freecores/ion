@@ -117,9 +117,9 @@ t_block memory_map_default[NUM_MEM_BLOCKS] = {
     /* Bootstrap BRAM, read only */
     {VECTOR_RESET,  0x00004800, 0xf8000000, 1, NULL, "Boot BRAM"},
     /* main external ram block  */
-    {0x00000000,    0x00008000, 0xf8000000, 0, NULL, "XRAM"},
+    {0x00000000,    0x00080000, 0xf8000000, 0, NULL, "XRAM"},
     /* external flash block */
-    {0xb0000000,    0x00010000, 0xf8000000, 0, NULL, "Flash"},
+    {0xb0000000,    0x00040000, 0xf8000000, 0, NULL, "Flash"},
 };
 
 #endif
@@ -129,6 +129,8 @@ t_block memory_map_default[NUM_MEM_BLOCKS] = {
 
 /** Values for the command line arguments */
 typedef struct s_args {
+    uint32_t log_trigger_address;
+    char *log_file_name;
     char *bin_filename[NUM_MEM_BLOCKS]; /**< bin file to load to area or null */
 } t_args;
 /** Parse cmd line args globally accessible */
@@ -240,6 +242,8 @@ typedef struct s_trace {
    unsigned int buf[TRACE_BUFFER_SIZE];   /**< queue of last jump targets */
    unsigned int next;                     /**< internal queue head pointer */
    FILE *log;                             /**< text log file or NULL */
+   int log_triggered;                     /**< !=0 if log has been triggered */
+   uint32_t log_trigger_address;          /**< */
    int pr[32];                            /**< last value of register bank */
    int hi, lo, epc;                       /**< last value of internal regs */
 } t_trace;
@@ -305,12 +309,14 @@ static unsigned int HWMemory[8];
 /*---- Local function prototypes ---------------------------------------------*/
 
 /* Debug and logging */
-void init_trace_buffer(t_state *s, const char *log_file_name);
+void init_trace_buffer(t_state *s, t_args *args);
 void close_trace_buffer(t_state *s);
 void dump_trace_buffer(t_state *s);
 void log_cycle(t_state *s);
 void log_read(t_state *s, int full_address, int word_value, int size, int log);
 void log_failed_assertions(t_state *s);
+uint32_t log_enabled(t_state *s);
+void trigger_log(t_state *s);
 
 int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args);
 void usage(void);
@@ -330,7 +336,7 @@ void start_load(t_state *s, uint32_t addr, int rt, int data);
 
 /** Log to file a memory read operation (not including target reg change) */
 void log_read(t_state *s, int full_address, int word_value, int size, int log){
-    if(s->t.log!=NULL && log!=0){
+    if(log_enabled(s) && log!=0){
         fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD\n",
               s->op_addr, full_address, word_value);
     }
@@ -344,17 +350,12 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     s->irqStatus |= IRQ_UART_WRITE_AVAILABLE;
     switch(address){
     case UART_READ:
-        word_value = 0x00000001;
-        //log_read(s, full_address, word_value, size, log);
-        return word_value;
         /* FIXME Take input from text file */
-        /*
-        if(kbhit()){
-            HWMemory[0] = getch();
-        }
-        s->irqStatus &= ~IRQ_UART_READ_AVAILABLE; //clear bit
-        return HWMemory[0];
-        */
+        while(!kbhit());
+        HWMemory[0] = getch();
+        //s->irqStatus &= ~IRQ_UART_READ_AVAILABLE; //clear bit
+        printf("%c", HWMemory[0]);
+        return (HWMemory[0] << 24) | 0x03;
     case IRQ_MASK:
        return HWMemory[1];
     case IRQ_MASK + 4:
@@ -387,7 +388,7 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     }
     if(!ptr){
         /* address out of mapped blocks: log and return zero */
-        if(s->t.log!=NULL && log!=0){
+        if(log_enabled(s) && log!=0){
             fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD UNMAPPED\n",
                 s->pc, full_address, 0);
         }
@@ -445,7 +446,7 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
 void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
     unsigned int i, ptr, mask, dvalue, b0, b1, b2, b3;
 
-    if(s->t.log!=NULL){
+    if(log_enabled(s)){
         b0 = value & 0x000000ff;
         b1 = value & 0x0000ff00;
         b2 = value & 0x00ff0000;
@@ -487,7 +488,7 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
         }
 
         fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR\n",
-                s->op_addr, address, mask, dvalue);
+                s->op_addr, address&0xfffffffc, mask, dvalue);
     }
 
     switch(address){
@@ -517,7 +518,7 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
                             ((address - s->blocks[i].start) % s->blocks[i].size);
 
             if(s->blocks[i].read_only){
-                if(s->t.log!=NULL && log!=0){
+                if(log_enabled(s) && log!=0){
                     fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR READ ONLY\n",
                     s->op_addr, address, mask, dvalue);
                     return;
@@ -528,7 +529,7 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
     }
     if(!ptr){
         /* address out of mapped blocks: log and return zero */
-        if(s->t.log!=NULL && log!=0){
+        if(log_enabled(s) && log!=0){
             fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR UNMAPPED\n",
                 s->op_addr, address, mask, dvalue);
         }
@@ -645,6 +646,7 @@ void cycle(t_state *s, int show_mode){
     unsigned int *u=(unsigned int*)s->r;
     unsigned int ptr, epc, rSave;
 
+    /* fetch and decode instruction */
     opcode = mem_read(s, 4, s->pc, 0);
     op = (opcode >> 26) & 0x3f;
     rs = (opcode >> 21) & 0x1f;
@@ -657,6 +659,11 @@ void cycle(t_state *s, int show_mode){
     target = (opcode << 6) >> 4;
     ptr = (short)imm + r[rs];
     r[0] = 0;
+
+    /* Trigger log if we fetch from trigger address */
+    if(s->pc == s->t.log_trigger_address){
+        trigger_log(s);
+    }
 
     /* if we are priting state to console, do it now */
     if(show_mode){
@@ -945,7 +952,8 @@ void do_debug(t_state *s){
                 printf("0x%8.8x=0x%8.8x\n", watch, mem_read(s, 4, watch,0));
             }
             printf("1=Debug 2=t_trace 3=Step 4=BreakPt 5=Go 6=Memory ");
-            printf("7=Watch 8=Jump 9=Quit A=dump > ");
+            printf("7=Watch 8=Jump 9=Quit A=Dump\n");
+            printf("L=LogTrigger > ");
         }
         ch = getch();
         if(ch != 'n'){
@@ -1017,6 +1025,11 @@ void do_debug(t_state *s){
             break;
         case '9': case 'q':
             return;
+        case 'l':
+            printf("Address> ");
+            scanf("%x", &(s->t.log_trigger_address));
+            printf("Log trigger address=0x%x\n", s->t.log_trigger_address);
+            break;
         }
     }
 }
@@ -1067,16 +1080,18 @@ int main(int argc,char *argv[]){
         return 1;
     };
 
+    /* Parse command line and pass any relevant arguments to CPU record */
     if(parse_cmd_line(argc,argv, &cmd_line_args)==0){
         return 0;
     }
 
+    /* Read binary object files into memory*/
     if(!read_binary_files(s, &cmd_line_args)){
         return 2;
     }
     printf("\n\n");
 
-    init_trace_buffer(s, "sw_sim_log.txt");
+    init_trace_buffer(s, &cmd_line_args);
 
     /* NOTE: Original mlite supported loading little-endian code, which this
       program doesn't. The endianess-conversion code has been removed.
@@ -1097,29 +1112,35 @@ int main(int argc,char *argv[]){
 /*----------------------------------------------------------------------------*/
 
 
-void init_trace_buffer(t_state *s, const char *log_file_name){
+void init_trace_buffer(t_state *s, t_args *args){
     int i;
 
 #if FILE_LOGGING_DISABLED
     s->t.log = NULL;
+    s->t.log_triggered = 0;
     return;
 #else
+    /* clear trace buffer */
     for(i=0;i<TRACE_BUFFER_SIZE;i++){
         s->t.buf[i]=0xffffffff;
     }
     s->t.next = 0;
 
     /* if file logging is enabled, open log file */
-    if(log_file_name!=NULL){
-        s->t.log = fopen(log_file_name, "w");
+    if(args->log_file_name!=NULL){
+        s->t.log = fopen(args->log_file_name, "w");
         if(s->t.log==NULL){
             printf("Error opening log file '%s', file logging disabled\n",
-                    log_file_name);
+                    args->log_file_name);
         }
     }
     else{
         s->t.log = NULL;
     }
+
+    /* Setup log trigger */
+    s->t.log_triggered = 0;
+    s->t.log_trigger_address = args->log_trigger_address;
 #endif
 }
 
@@ -1149,7 +1170,7 @@ void log_cycle(t_state *s){
     last_pc = s->pc;
 
     /* if file logging is enabled, dump a trace log to file */
-    if(s->t.log!=NULL){
+    if(log_enabled(s)){
         log_pc = s->op_addr;
 
         for(i=0;i<32;i++){
@@ -1202,6 +1223,24 @@ void log_failed_assertions(t_state *s){
     }
 }
 
+uint32_t log_enabled(t_state *s){
+    return ((s->t.log != NULL) && (s->t.log_triggered!=0));
+}
+
+void trigger_log(t_state *s){
+    uint32_t i;
+
+    s->t.log_triggered = 1;
+
+    for(i=0;i<32;i++){
+        s->t.pr[i] = s->r[i];
+    }
+
+    s->t.lo = s->lo;
+    s->t.hi = s->hi;
+    s->t.epc = s->epc;
+}
+
 void free_cpu(t_state *s){
     int i;
 
@@ -1250,6 +1289,8 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
     /* fill cmd line args with default values */
     for(i=0;i<NUM_MEM_BLOCKS;i++){
         args->bin_filename[i] = NULL;
+        args->log_file_name = "sw_sim_log.txt";
+        args->log_trigger_address = VECTOR_RESET;
     }
 
     /* parse actual cmd line args */
@@ -1272,6 +1313,9 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
         else if(strncmp(argv[i],"--xram=", strlen("--xram="))==0){
             args->bin_filename[1] = &(argv[i][strlen("--xram=")]);
         }
+        else if(strncmp(argv[i],"--trigger=", strlen("--trigger="))==0){
+            sscanf(&(argv[i][strlen("--trigger=")]), "%x", &(args->log_trigger_address));
+        }
         else if((strcmp(argv[i],"--help")==0)||(strcmp(argv[i],"-h")==0)){
             usage();
             return 0;
@@ -1293,6 +1337,7 @@ void usage(void){
     printf("--bram=<file name>      : BRAM initialization file\n");
     printf("--xram=<file name>      : XRAM initialization file\n");
     printf("--flash=<file name>     : FLASH initialization file\n");
+    printf("--trigger=<hex number>  : Log trigger address\n");
     printf("--plasma                : Simulate Plasma instead of MIPS-I\n");
     printf("--help, -h              : Show this usage text\n");
 }
