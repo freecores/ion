@@ -68,12 +68,13 @@ signal mpu_io_rd_vma :      std_logic;
 signal mpu_io_byte_we :     std_logic_vector(3 downto 0);
 
 -- interface to UARTs
-signal data_uart :          t_word;
-signal data_uart_status :   t_word;
+signal uart_rd_word :       t_word;
 signal uart_tx_rdy :        std_logic := '1';
 signal uart_rx_rdy :        std_logic := '1';
-signal uart_write_tx :      std_logic;
+signal uart_write :         std_logic;
+signal uart_read :          std_logic;
 signal uart_read_rx :       std_logic;
+signal uart_data_rx :       std_logic_vector(7 downto 0);
 
 
 -- Block ram
@@ -201,15 +202,30 @@ end process fpga_ram_block;
 serial_rx : entity work.rs232_rx 
     port map(
         rxd =>      uart_rxd,
-        data_rx =>  OPEN, --rs232_data_rx,
+        data_rx =>  uart_data_rx,
         rx_rdy =>   uart_rx_rdy,
-        read_rx =>  '1', --read_rx,
+        read_rx =>  uart_read_rx,
         clk =>      clk,
         reset =>    reset
     );
 
 
-uart_write_tx <= '1' 
+-- '1'-> Read some UART register (0x2---0---)
+uart_read <= '1'
+    when mpu_io_rd_vma='1' and 
+         mpu_io_rd_addr(31 downto 28)=X"2" and
+         mpu_io_rd_addr(15 downto 12)=X"0"
+    else '0';
+
+-- '1'-> Read UART Rx data (0x2---0-0-)
+-- (This signal clears the RX 1-char buffer)
+uart_read_rx <= '1'
+    when uart_read='1' and 
+         mpu_io_rd_addr( 7 downto  4)=X"0"
+    else '0';
+
+-- '1'-> Write UART Tx register (trigger UART Tx)  (0x20000000)
+uart_write <= '1' 
     when mpu_io_byte_we/="0000" and 
          mpu_io_wr_addr(31 downto 28)=X"2" and
          mpu_io_wr_addr(15 downto 12)=X"0"
@@ -220,17 +236,18 @@ serial_tx : entity work.rs232_tx
         clk =>      clk,
         reset =>    reset,
         rdy =>      uart_tx_rdy,
-        load =>     uart_write_tx,
+        load =>     uart_write,
         data_i =>   mpu_io_wr_data(7 downto 0),
         txd =>      uart_txd
     );
 
--- UART read registers; only status, and hardwired, for the time being
-data_uart <= data_uart_status; -- FIXME no data rx yet
-data_uart_status <= X"0000000" & "00" & uart_tx_rdy & uart_rx_rdy;
+-- Both UART rd addresses 000 and 020 read the same word (save a mux), but only
+-- address 000 clears the rx buffer.
+uart_rd_word <= uart_data_rx & X"00000" & "00" & uart_tx_rdy & uart_rx_rdy;
 
+-- IO Rd mux: either the UART data/status word od the IO coming from outside
 mpu_io_rd_data <= 
-    data_uart when mpu_io_rd_addr(15 downto 12)=X"0" else
+    uart_rd_word when mpu_io_rd_addr(15 downto 12)=X"0" else
     io_rd_data;
 
 -- io_rd_data 
