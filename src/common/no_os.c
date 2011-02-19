@@ -50,5 +50,5 @@ int kbhit(void)
 int getch(void)
 {
    while(!kbhit()) ;
-   return MemoryRead(UART_READ);
+   return (MemoryRead(UART_READ)>>24)&0x000000ff;
 }
