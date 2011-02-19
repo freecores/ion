@@ -357,7 +357,7 @@ begin
         prom(conv_integer(unsigned(prom_rd_addr)))(23 downto 16) when prom_oe_n='0' and sram_address(1 downto 0)="01" else
         prom(conv_integer(unsigned(prom_rd_addr)))(15 downto  8) when prom_oe_n='0' and sram_address(1 downto 0)="10" else
         prom(conv_integer(unsigned(prom_rd_addr)))( 7 downto  0) when prom_oe_n='0' and sram_address(1 downto 0)="11" else
-        (others => 'Z');            
+        (others => 'Z');
     
     
     simulated_io:
@@ -416,7 +416,8 @@ begin
     process
     begin
         log_cpu_activity(clk, reset, done, 
-                         "@entity_name@/cpu", log_info, "log_info", log_file);
+                         "@entity_name@/cpu", log_info, "log_info", 
+                         @log_trigger_addr@, log_file);
         wait;
     end process log_execution;
 
