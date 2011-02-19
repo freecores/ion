@@ -49,8 +49,11 @@ $BSS_CLEAR:
     addiu   $5, $5, 4
 
     # Move data section image from flash to RAM, if necessary
+    # (assume if program does not run from BRAM, it runs from FASH)
+    .ifndef  RUN_FROM_BRAM
     jal     copy_data_sections
     nop
+    .endif
     
     jal     main                    # init done; call main()
     nop

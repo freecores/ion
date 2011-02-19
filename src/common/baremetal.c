@@ -56,6 +56,7 @@ void po_num(uint32_t num){
 
 
 void copy_data_sections(void){
+#ifndef RUN_FROM_BRAM
     uint32_t i;
     /* Move data section image from flash to RAM */
     if (data_start != data_load_start){
@@ -63,6 +64,7 @@ void copy_data_sections(void){
             data_start[i] = data_load_start[i];
         }
     }
+#endif
 }
 
 
