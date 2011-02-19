@@ -230,10 +230,19 @@ p2_rd_mux_control <= p2_ld_upper_hword & p2_ld_upper_byte & p2_rd_addr;
 
 -- Extension for unused bits will be zero or the sign (bit 7 or bit 15)
 p2_data_word_ext <= '0'          when p2_ld_unsigned='1' else
-                    data_rd(15)  when p2_ld_upper_byte='1' else
-                    data_rd(7)   when p2_rd_addr="11" else
+                    -- LH
+                    data_rd(31)  when p2_ld_upper_byte='1' and p2_rd_addr="00" else
+                    data_rd(15)  when p2_ld_upper_byte='1' and p2_rd_addr="10" else
+                    -- LB
+                    data_rd(7)  when p2_rd_addr="11" else
                     data_rd(15)  when p2_rd_addr="10" else
-                    data_rd(23);
+                    data_rd(23)  when p2_rd_addr="01" else
+                    data_rd(31);
+
+--                    data_rd(15)  when p2_ld_upper_byte='1' else
+--                    data_rd(7)   when p2_rd_addr="11" else
+--                    data_rd(15)  when p2_rd_addr="10" else
+--                    data_rd(23);
 
 -- byte 0 may come from any of the 4 bytes of the input word
 with p2_rd_mux_control select p2_data_word_rd(7 downto 0) <=
@@ -646,7 +655,7 @@ p1_ac.use_slt <= '1' when (p1_ir_op="000001" and p1_ir_reg(20 downto 17)="01000"
                         (p1_ir_op="000000" and p1_ir_reg(5 downto 1)="10101") or
                         p1_ir_op="001010" or p1_ir_op="001011"
                else '0';
-p1_ac.arith_unsigned <= p1_ac.use_slt and p1_ir_reg(0);
+p1_ac.arith_unsigned <= p1_ac.use_slt and (p1_ir_reg(0) or p1_ir_op(26));
 
 p1_ac.use_logic(0) <= '1' when (p1_op_special='1' and p1_ir_fn(5 downto 3)/="000") or
                     -- all immediate arith and logic
