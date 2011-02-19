@@ -82,6 +82,11 @@ type t_log_info is record
     
     read_pending :          boolean;
     write_pending :         boolean;
+    
+    -- Log trigger --------------------------------------------------
+    -- Enable logging after fetching from a given address -----------
+    log_trigger_address :   t_word;
+    log_triggered :         boolean;
 end record t_log_info;
 
 procedure log_cpu_activity(
@@ -91,6 +96,7 @@ procedure log_cpu_activity(
                 entity_name :   string;
                 signal info :   inout t_log_info; 
                 signal_name :   string;
+                trigger_addr :  in t_word;
                 file l_file :   TEXT);
 
 
@@ -99,13 +105,23 @@ end package;
 package body mips_tb_pkg is
 
 procedure log_cpu_status(
-                signal info :   inout t_log_info; 
+                signal info :   inout t_log_info;
                 file l_file :   TEXT) is
 variable i : integer;
 variable ri : std_logic_vector(7 downto 0);
 variable full_pc, temp, temp2 : t_word;
 variable k : integer := 2;
 begin
+    
+    -- Trigger logging if the CPU fetches from trigger address
+    if (info.log_trigger_address(31 downto 2) = info.present_code_rd_addr) and
+       info.code_rd_vma='1' then
+        info.log_triggered <= true;
+        
+        assert 1=0
+        report "Log triggered by fetch from address 0x"& hstr(info.log_trigger_address)
+        severity note;
+    end if;
     
     -- This is the address of the opcode that triggered the changed we're
     -- about to log
@@ -119,9 +135,11 @@ begin
         ri := X"00";
         for i in 0 to 31 loop
             if info.prev_rbank(i)/=info.rbank(i) 
-               and info.prev_rbank(i)(0)/='U' then    
-                print(l_file, "("& hstr(full_pc)& ") "& 
-                      "["& hstr(ri)& "]="& hstr(info.rbank(i)));
+               and info.prev_rbank(i)(0)/='U' then
+                if info.log_triggered then
+                    print(l_file, "("& hstr(full_pc)& ") "& 
+                        "["& hstr(ri)& "]="& hstr(info.rbank(i)));
+                end if;
             end if;
             ri := ri + 1;
         end loop;        
@@ -143,20 +161,24 @@ begin
             if info.pending_data_wr_we(0)='0' then
                 temp := temp and X"ffffff00";
             end if;
-            print(l_file, "("& hstr(info.pending_data_wr_pc) &") ["& 
-                  hstr(info.pending_data_wr_addr) &"] |"& 
-                  hstr(ri)& "|="& 
-                  hstr(temp)& " WR" );    
+            if info.log_triggered then
+                print(l_file, "("& hstr(info.pending_data_wr_pc) &") ["& 
+                    hstr(info.pending_data_wr_addr) &"] |"& 
+                    hstr(ri)& "|="& 
+                    hstr(temp)& " WR" );
+            end if;
             info.write_pending <= false;
         end if;   
 
 
         -- Log memory reads ------------------------------------------
         if info.read_pending and info.load='1' then
-            print(l_file, "("& hstr(info.pc_m(1)) &") ["& 
-                  hstr(info.pending_data_rd_addr) &"] <"& 
-                  "**"& ">="& 
-                  hstr(info.word_loaded)& " RD" ); -- FIXME
+            if info.log_triggered then
+                print(l_file, "("& hstr(info.pc_m(1)) &") ["& 
+                      hstr(info.pending_data_rd_addr) &"] <"& 
+                      "**"& ">="& 
+                      hstr(info.word_loaded)& " RD" ); -- FIXME
+            end if;
             info.read_pending <= false;
         end if;    
                            
@@ -177,9 +199,13 @@ begin
                 -- negate reg_lo before displaying
                 temp := not info.reg_lo;
                 temp := temp + 1;
-                print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(temp));
+                if info.log_triggered then
+                    print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(temp));
+                end if;
             else
-                print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(info.reg_lo));
+                if info.log_triggered then
+                    print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(info.reg_lo));
+                end if;
             end if;
         end if;
         if info.prev_hi /= info.reg_hi and info.prev_hi(0)/='U' then
@@ -190,13 +216,17 @@ begin
             else
                 temp2 := info.pc_m(k-1);
             end if;
-
-            print(l_file, "("& hstr(temp2)& ") [HI]="& hstr(info.reg_hi));
+            
+            if info.log_triggered then
+                print(l_file, "("& hstr(temp2)& ") [HI]="& hstr(info.reg_hi));
+            end if;
         end if;                
                        
         if info.prev_epc /= info.cp0_epc and info.cp0_epc(31)/='U'  then
             temp := info.cp0_epc & "00";
-            print(l_file, "("& hstr(info.pc_m(k-1))& ") [EP]="& hstr(temp));
+            if info.log_triggered then
+                print(l_file, "("& hstr(info.pc_m(k-1))& ") [EP]="& hstr(temp));
+            end if;
             info.prev_epc <= info.cp0_epc;
         end if;
 
@@ -242,6 +272,7 @@ procedure log_cpu_activity(
                 entity_name :   string;
                 signal info :   inout t_log_info; 
                 signal_name :   string;
+                trigger_addr :  in t_word;
                 file l_file :   TEXT) is
 begin
     init_signal_spy("/"&entity_name&"/p1_rbank", signal_name&".rbank", 0, -1);
@@ -265,6 +296,12 @@ begin
         if reset='1' then
             -- FIXME should use real reset vector here
             info.pc_m <= (others => X"00000000");
+            
+            -- By default logging is DISABLED by triggering with an impossible
+            -- fetch address. Logging must be enabled from outside by 
+            -- setting log_trigger_address to a suitable value.
+            info.log_trigger_address <= trigger_addr;
+            info.log_triggered <= false;
         else
             log_cpu_status(info, l_file);
         end if;
