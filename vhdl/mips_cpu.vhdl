@@ -4,7 +4,7 @@
 -- project:       ION (http://www.opencores.org/project,ion_cpu)
 -- author:        Jose A. Ruiz (ja_rd@hotmail.com)
 -- created:       Jan/11/2011
--- last modified: Jan/31/2011 (ja_rd@hotmail.com)
+-- last modified: Mar/03/2011 (ja_rd@hotmail.com)
 --------------------------------------------------------------------------------
 -- Software placed into the public domain by the author. Use under the terms of
 -- the GPL.
@@ -52,18 +52,18 @@ entity mips_cpu is
         reset           : in std_logic;
         interrupt       : in std_logic;
 
-        data_rd_addr    : out std_logic_vector(31 downto 0);
+        data_addr       : out std_logic_vector(31 downto 0);
+
         data_rd         : in std_logic_vector(31 downto 0);
         data_rd_vma     : out std_logic;
+
+        byte_we         : out std_logic_vector(3 downto 0);
+        data_wr         : out std_logic_vector(31 downto 0);
         
         code_rd_addr    : out std_logic_vector(31 downto 2);
         code_rd         : in std_logic_vector(31 downto 0);
         code_rd_vma     : out std_logic;
-        
-        data_wr_addr    : out std_logic_vector(31 downto 2);
-        byte_we         : out std_logic_vector(3 downto 0);
-        data_wr         : out std_logic_vector(31 downto 0);
-      
+
         mem_wait        : in std_logic
     );
 end; --entity mips_cpu
@@ -470,8 +470,8 @@ begin
     end if;
 end process pc_register;
 
--- FIXME we should not output the lowest 2 bits
-data_rd_addr <= p1_data_addr(31 downto 0);
+-- Common rd/wr address; lowest 2 bits are output as debugging aid only
+data_addr <= p1_data_addr(31 downto 0);
 
 -- FIXME these two need to pushed behind a register, they are glitch-prone
 data_rd_vma <= p1_do_load and not pipeline_stalled; -- FIXME register
@@ -479,7 +479,6 @@ code_rd_vma <= not stall_pipeline; -- FIXME register
 
 code_rd_addr <= p0_pc_next;
 
-data_wr_addr <= p1_data_addr(31 downto 2);
 
 -- compute target of J/JR instructions
 p0_pc_jump <=   p1_rs(31 downto 2) when p1_do_reg_jump='1' else

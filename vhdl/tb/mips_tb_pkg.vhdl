@@ -61,7 +61,7 @@ type t_log_info is record
     code_rd_vma :           std_logic;
     data_byte_we :          std_logic_vector(3 downto 0);
 
-    present_data_wr_addr :  t_pc;
+    present_data_wr_addr :  t_word;
     present_data_wr :       t_word;
     present_data_rd_addr :  t_word;
     present_code_rd_addr :  t_pc;
@@ -246,7 +246,7 @@ begin
     if info.data_byte_we/="0000" then
         info.write_pending <= true;
         info.pending_data_wr_we <= info.data_byte_we;
-        info.pending_data_wr_addr <= info.present_data_wr_addr & "00";
+        info.pending_data_wr_addr <= info.present_data_wr_addr;
         info.pending_data_wr_pc <= info.pc_m(k-1);
         info.pending_data_wr <= info.present_data_wr;
     end if;
@@ -285,11 +285,11 @@ begin
     init_signal_spy("/"&entity_name&"/data_rd_vma", signal_name&".data_rd_vma", 0, -1);
     init_signal_spy("/"&entity_name&"/code_rd_vma", signal_name&".code_rd_vma", 0, -1);
     init_signal_spy("/"&entity_name&"/p2_do_load", signal_name&".load", 0, -1);
-    init_signal_spy("/"&entity_name&"/data_wr_addr", signal_name&".present_data_wr_addr", 0, -1);
+    init_signal_spy("/"&entity_name&"/data_addr", signal_name&".present_data_wr_addr", 0, -1);
     init_signal_spy("/"&entity_name&"/data_wr", signal_name&".present_data_wr", 0, -1);
     init_signal_spy("/"&entity_name&"/byte_we", signal_name&".data_byte_we", 0, -1);
     init_signal_spy("/"&entity_name&"/p2_data_word_rd", signal_name&".word_loaded", 0, -1);
-    init_signal_spy("/"&entity_name&"/data_rd_addr", signal_name&".present_data_rd_addr", 0, -1);
+    init_signal_spy("/"&entity_name&"/data_addr", signal_name&".present_data_rd_addr", 0, -1);
 
     while done='0' loop
         wait until clk'event and clk='1';

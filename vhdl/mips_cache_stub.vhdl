@@ -2,13 +2,14 @@
 -- mips_cache_stub.vhdl -- 1-word cache module
 --
 -- This module has the same interface and logic as a real cache but the cache
--- memory is just 1 word for each of code and data.
+-- memory is just 1 word for each of code and data, and it's missing any tag
+-- matching logic so all accesses 'miss'.
 --
 -- It interfaces the CPU to the following:
 --
 --  1.- Internal 32-bit-wide BRAM for read only
 --  2.- Internal 32-bit I/O bus
---  3.- External 16-bit wide SRAM
+--  3.- External 16-bit or 8-bit wide static memory (SRAM or FLASH)
 --
 -- The SRAM memory interface signals are meant to connect directly to FPGA pins
 -- and all outputs are registered (tco should be minimal).
@@ -60,10 +61,7 @@
 --      to unmapped areas. I haven't yet decided how to handle that (return
 --      zero, trigger trap, mirror another mapped area...).
 --
--- 3.- Code refills from SRAM is unimplemented yet
---      To be done for sheer lack of time.
---
--- 4.- Does not work as a real 1-word cache yet
+-- 3.- Does not work as a real 1-word cache yet
 --      That functionality is still missing, all accesses 'miss'. It should be
 --      implemented, as a way to test the real cache logic on a small scale.
 --
@@ -78,25 +76,30 @@ use work.mips_pkg.all;
 
 entity mips_cache_stub is
     generic (
-        BRAM_ADDR_SIZE : integer := 10;
-        SRAM_ADDR_SIZE : integer := 17
+        BRAM_ADDR_SIZE : integer    := 10;  -- BRAM address size
+        SRAM_ADDR_SIZE : integer    := 17;  -- Static RAM/Flash address size
+        
+        -- these cache parameters are unused in thie implementation, they're
+        -- here for compatibility to the real cache module.
+        LINE_SIZE : integer         := 4;   -- Line size in words
+        CACHE_SIZE : integer        := 256  -- I- and D- cache size in lines
     );
     port(
         clk             : in std_logic;
         reset           : in std_logic;
 
         -- Interface to CPU core
-        data_rd_addr    : in std_logic_vector(31 downto 0);
+        data_addr       : in std_logic_vector(31 downto 0);
+        
         data_rd         : out std_logic_vector(31 downto 0);
         data_rd_vma     : in std_logic;
+
+        byte_we         : in std_logic_vector(3 downto 0);
+        data_wr         : in std_logic_vector(31 downto 0);
 
         code_rd_addr    : in std_logic_vector(31 downto 2);
         code_rd         : out std_logic_vector(31 downto 0);
         code_rd_vma     : in std_logic;
-
-        data_wr_addr    : in std_logic_vector(31 downto 2);
-        byte_we         : in std_logic_vector(3 downto 0);
-        data_wr         : in std_logic_vector(31 downto 0);
 
         mem_wait        : out std_logic;
         cache_enable    : in std_logic;
@@ -624,7 +627,7 @@ begin
             -- data_rd_addr_reg always has the addr of any pending read
             if data_rd_vma='1' then
                 read_pending <= '1';
-                data_rd_addr_reg <= data_rd_addr(31 downto 2);
+                data_rd_addr_reg <= data_addr(31 downto 2);
             elsif ps=data_refill_sram_1 or
                   ps=data_refill_sram8_3 or
                   ps=data_refill_bram_1 or
@@ -639,7 +642,7 @@ begin
             if byte_we/="0000" and ps=idle then
                 byte_we_reg <= byte_we;
                 data_wr_reg <= data_wr;
-                data_wr_addr_reg <= data_wr_addr;
+                data_wr_addr_reg <= data_addr(31 downto 2);
                 write_pending <= '1';
             elsif ps=data_writethrough_sram_1b or
                   ps=data_write_io_0 or
@@ -828,7 +831,8 @@ sram_address(1) <=
     else '0';
 
 -- The lowest addr bit will only be used when accessing byte-wide memory, and
--- even when we're reading word-aligned code (we need to read the four bytes)
+-- even when we're reading word-aligned code (because we need to read the four 
+-- bytes one by one).
 sram_address(0) <=
     '0'     when (ps=data_refill_sram8_0 or ps=data_refill_sram8_2 or
                   ps=code_refill_sram8_0 or ps=code_refill_sram8_2) else
