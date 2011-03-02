@@ -48,13 +48,12 @@ end; --entity mips_mpu
 architecture rtl of mips_mpu is
 
 -- interface cpu-cache
-signal cpu_data_rd_addr :   t_word;
+signal cpu_data_addr :      t_word;
 signal cpu_data_rd_vma :    std_logic;
 signal cpu_data_rd :        t_word;
 signal cpu_code_rd_addr :   t_pc;
 signal cpu_code_rd :        t_word;
 signal cpu_code_rd_vma :    std_logic;
-signal cpu_data_wr_addr :   t_pc;
 signal cpu_data_wr :        t_word;
 signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
@@ -177,9 +176,9 @@ signal bram :               t_bram := (
     X"00463821",X"10640006",X"00000000",X"10680004",
     X"00000000",X"A0E30000",X"0BF00143",X"24C60001",
     X"00463021",X"03E00008",X"A0C00000",X"636F6D70",
-    X"696C6520",X"74696D65",X"3A204665",X"62203139",
-    X"20323031",X"31202D2D",X"2031323A",X"33343A34",
-    X"330A0000",X"67636320",X"76657273",X"696F6E3A",
+    X"696C6520",X"74696D65",X"3A204D61",X"72202032",
+    X"20323031",X"31202D2D",X"2030383A",X"35353A34",
+    X"360A0000",X"67636320",X"76657273",X"696F6E3A",
     X"2020342E",X"342E310A",X"00000000",X"0A0A4865",
     X"6C6C6F20",X"576F726C",X"64210A0A",X"0A000000",
     X"00000000",X"00000000",X"00000000",X"00000000",
@@ -621,7 +620,7 @@ cpu: entity work.mips_cpu
     port map (
         interrupt   => '0',
         
-        data_rd_addr=> cpu_data_rd_addr,
+        data_addr   => cpu_data_addr,
         data_rd_vma => cpu_data_rd_vma,
         data_rd     => cpu_data_rd,
         
@@ -629,7 +628,6 @@ cpu: entity work.mips_cpu
         code_rd     => cpu_code_rd,
         code_rd_vma => cpu_code_rd_vma,
         
-        data_wr_addr=> cpu_data_wr_addr,
         data_wr     => cpu_data_wr,
         byte_we     => cpu_byte_we,
     
@@ -649,7 +647,7 @@ cache: entity work.mips_cache_stub
         reset           => reset,
         
         -- Interface to CPU core
-        data_rd_addr    => cpu_data_rd_addr,
+        data_addr       => cpu_data_addr,
         data_rd         => cpu_data_rd,
         data_rd_vma     => cpu_data_rd_vma,
                         
@@ -657,7 +655,6 @@ cache: entity work.mips_cache_stub
         code_rd         => cpu_code_rd,
         code_rd_vma     => cpu_code_rd_vma,
                         
-        data_wr_addr    => cpu_data_wr_addr,
         byte_we         => cpu_byte_we,
         data_wr         => cpu_data_wr,
                         
