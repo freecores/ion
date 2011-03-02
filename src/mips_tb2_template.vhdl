@@ -129,13 +129,12 @@ signal sram_byte_we_n :     std_logic_vector(1 downto 0);
 signal sram_oe_n :          std_logic;
 
 -- interface cpu-cache
-signal cpu_data_rd_addr :   t_word;
+signal cpu_data_addr :      t_word;
 signal cpu_data_rd_vma :    std_logic;
 signal cpu_data_rd :        t_word;
 signal cpu_code_rd_addr :   t_pc;
 signal cpu_code_rd :        t_word;
 signal cpu_code_rd_vma :    std_logic;
-signal cpu_data_wr_addr :   t_pc;
 signal cpu_data_wr :        t_word;
 signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
@@ -183,7 +182,7 @@ begin
     port map (
         interrupt   => '0',
         
-        data_rd_addr=> cpu_data_rd_addr,
+        data_addr   => cpu_data_addr,
         data_rd_vma => cpu_data_rd_vma,
         data_rd     => cpu_data_rd,
         
@@ -191,7 +190,6 @@ begin
         code_rd     => cpu_code_rd,
         code_rd_vma => cpu_code_rd_vma,
         
-        data_wr_addr=> cpu_data_wr_addr,
         data_wr     => cpu_data_wr,
         byte_we     => cpu_byte_we,
 
@@ -201,25 +199,27 @@ begin
         reset       => reset
     );
 
+
     cache: entity work.mips_cache_stub
     generic map (
         BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
-        SRAM_ADDR_SIZE => 32 -- we need the full address to decode sram vs flash
+        SRAM_ADDR_SIZE => 32,-- we need the full address to decode sram vs flash
+        LINE_SIZE =>      4,
+        CACHE_SIZE =>     256
     )
     port map (
         clk             => clk,
         reset           => reset,
         
         -- Interface to CPU core
-        data_rd_addr    => cpu_data_rd_addr,
+        data_addr       => cpu_data_addr,
         data_rd         => cpu_data_rd,
         data_rd_vma     => cpu_data_rd_vma,
                         
         code_rd_addr    => cpu_code_rd_addr,
         code_rd         => cpu_code_rd,
         code_rd_vma     => cpu_code_rd_vma,
-                        
-        data_wr_addr    => cpu_data_wr_addr,
+
         byte_we         => cpu_byte_we,
         data_wr         => cpu_data_wr,
                         
@@ -282,8 +282,8 @@ begin
         
     end process drive_uut;
 
-    full_rd_addr <= cpu_data_rd_addr;
-    full_wr_addr <= cpu_data_wr_addr & "00";
+    full_rd_addr <= cpu_data_addr;
+    full_wr_addr <= cpu_data_addr(31 downto 2) & "00";
     full_code_addr <= cpu_code_rd_addr & "00";
 
     data_ram_block:

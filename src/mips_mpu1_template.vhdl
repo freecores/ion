@@ -48,13 +48,12 @@ end; --entity mips_mpu
 architecture rtl of mips_mpu is
 
 -- interface cpu-cache
-signal cpu_data_rd_addr :   t_word;
+signal cpu_data_addr :      t_word;
 signal cpu_data_rd_vma :    std_logic;
 signal cpu_data_rd :        t_word;
 signal cpu_code_rd_addr :   t_pc;
 signal cpu_code_rd :        t_word;
 signal cpu_code_rd_vma :    std_logic;
-signal cpu_data_wr_addr :   t_pc;
 signal cpu_data_wr :        t_word;
 signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
@@ -108,7 +107,7 @@ cpu: entity work.mips_cpu
     port map (
         interrupt   => '0',
         
-        data_rd_addr=> cpu_data_rd_addr,
+        data_addr   => cpu_data_addr,
         data_rd_vma => cpu_data_rd_vma,
         data_rd     => cpu_data_rd,
         
@@ -116,7 +115,6 @@ cpu: entity work.mips_cpu
         code_rd     => cpu_code_rd,
         code_rd_vma => cpu_code_rd_vma,
         
-        data_wr_addr=> cpu_data_wr_addr,
         data_wr     => cpu_data_wr,
         byte_we     => cpu_byte_we,
     
@@ -136,7 +134,7 @@ cache: entity work.mips_cache_stub
         reset           => reset,
         
         -- Interface to CPU core
-        data_rd_addr    => cpu_data_rd_addr,
+        data_addr       => cpu_data_addr,
         data_rd         => cpu_data_rd,
         data_rd_vma     => cpu_data_rd_vma,
                         
@@ -144,7 +142,6 @@ cache: entity work.mips_cache_stub
         code_rd         => cpu_code_rd,
         code_rd_vma     => cpu_code_rd_vma,
                         
-        data_wr_addr    => cpu_data_wr_addr,
         byte_we         => cpu_byte_we,
         data_wr         => cpu_data_wr,
                         

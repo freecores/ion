@@ -56,11 +56,10 @@ constant SIMULATION_LENGTH : integer := @sim_len@;
 --------------------------------------------------------------------------------
 -- UUT & interface signals
 
-signal rd_addr :            std_logic_vector(31 downto 0);
+signal rd_wr_addr :         std_logic_vector(31 downto 0);
 signal prev_rd_addr :       std_logic_vector(31 downto 0);
 signal vma_data :           std_logic;
 signal vma_code :           std_logic;
-signal wr_addr :            std_logic_vector(31 downto 2);
 signal full_rd_addr :       std_logic_vector(31 downto 0);
 signal full_wr_addr :       std_logic_vector(31 downto 0);
 signal byte_we :            std_logic_vector(3 downto 0);
@@ -152,7 +151,7 @@ begin
     port map (
         interrupt   => interrupt,
         
-        data_rd_addr=> rd_addr,
+        data_addr   => rd_wr_addr,
         data_rd_vma => vma_data,
         data_rd     => data_r,
         
@@ -160,7 +159,6 @@ begin
         code_rd     => code_r,
         code_rd_vma => vma_code,
         
-        data_wr_addr=> wr_addr,
         data_wr     => data_w,
         byte_we     => byte_we,
 
@@ -214,8 +212,8 @@ begin
 
 
     -- 'full' read address, used for simulation display only
-    full_rd_addr <= rd_addr;
-    full_wr_addr <= wr_addr & "00";
+    full_rd_addr <= rd_wr_addr;
+    full_wr_addr <= rd_wr_addr(31 downto 2) & "00";
     full_code_addr <= code_addr & "00";
 
     data_addr_rd <= full_rd_addr(DATA_ADDR_SIZE-1+2 downto 2);
@@ -233,7 +231,7 @@ begin
             if reset='1' then
                 data_ram <= (others =>'0');
             else
-                prev_rd_addr <= rd_addr;
+                prev_rd_addr <= rd_wr_addr;
                 
                 data_ram <= 
                   ram3(conv_integer(unsigned(data_addr_rd))) &
