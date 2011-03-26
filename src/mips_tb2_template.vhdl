@@ -203,7 +203,7 @@ begin
     );
 
 
-    cache: entity work.mips_cache
+    cache: entity work.mips_cache_stub
     generic map (
         BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
         SRAM_ADDR_SIZE => 32,-- we need the full address to decode sram vs flash
