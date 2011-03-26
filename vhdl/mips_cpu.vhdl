@@ -4,7 +4,7 @@
 -- project:       ION (http://www.opencores.org/project,ion_cpu)
 -- author:        Jose A. Ruiz (ja_rd@hotmail.com)
 -- created:       Jan/11/2011
--- last modified: Mar/03/2011 (ja_rd@hotmail.com)
+-- last modified: Mar/26/2011 (ja_rd@hotmail.com)
 --------------------------------------------------------------------------------
 -- Software placed into the public domain by the author. Use under the terms of
 -- the GPL.
@@ -63,6 +63,9 @@ entity mips_cpu is
         code_rd_addr    : out std_logic_vector(31 downto 2);
         code_rd         : in std_logic_vector(31 downto 0);
         code_rd_vma     : out std_logic;
+        
+        cache_enable    : out std_logic;
+        ic_invalidate   : out std_logic;
 
         mem_wait        : in std_logic
     );
@@ -193,12 +196,15 @@ signal stalled_muldiv :     std_logic;
 -- pipeline is stalled because of a load instruction interlock
 signal stalled_interlock :  std_logic;
 
+signal reset_done :         std_logic;
 
 --------------------------------------------------------------------------------
 -- CP0 registers and signals
 
 -- CP0[12]: status register 
 signal cp0_status :         std_logic_vector(1 downto 0);
+-- CP0[12]: status register, cache control
+signal cp0_cache_control :  std_logic_vector(17 downto 16);
 -- Output of CP0 register bank (only a few regs are implemented)
 signal cp0_reg_read :       t_word;
 -- CP0[14]: EPC register (PC value saved at exceptions)
@@ -452,6 +458,7 @@ begin
             -- reset to <vector>-4 so that 1st fetch addr is <vector>
             p0_pc_reg <= RESET_VECTOR_M4(31 downto 2);
         else
+            if reset_done='1' then
             -- p0_pc_reg holds the same value as external sync ram addr register
             p0_pc_reg <= p0_pc_next;
             -- p0_pc_restart = addr saved to EPC on interrupts (@note2)
@@ -466,6 +473,7 @@ begin
             else
                 cp0_in_delay_slot <= '1'; -- in a delay slot
             end if;
+            end if;
         end if;
     end if;
 end process pc_register;
@@ -475,10 +483,25 @@ data_addr <= p1_data_addr(31 downto 0);
 
 -- FIXME these two need to pushed behind a register, they are glitch-prone
 data_rd_vma <= p1_do_load and not pipeline_stalled; -- FIXME register
-code_rd_vma <= not stall_pipeline; -- FIXME register
+code_rd_vma <= (not stall_pipeline) and reset_done; -- FIXME register
+
+-- reset_done will be asserted after the reset process is finished, when the
+-- CPU can start operating normally.
+-- We only use it to make sure code_rd_vma is not asserted prematurely.
+wait_for_end_of_reset:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            reset_done <= '0';
+        else
+            reset_done <= '1';
+        end if;
+    end if;
+end process wait_for_end_of_reset;
+
 
 code_rd_addr <= p0_pc_next;
-
 
 -- compute target of J/JR instructions
 p0_pc_jump <=   p1_rs(31 downto 2) when p1_do_reg_jump='1' else
@@ -964,6 +987,7 @@ begin
         if reset='1' then
             -- "10" => mode=kernel; ints=disabled
             cp0_status <= "10";
+            cp0_cache_control <= "00";
             cp0_cause_exc_code <= "00000";
             cp0_cause_bd <= '0';
         else
@@ -971,6 +995,7 @@ begin
             if p1_set_cp0='1' then
                 -- FIXME check for CP0 reg index
                 cp0_status <= p1_rs(cp0_status'high downto 0);
+                cp0_cache_control <= p1_rs(17 downto 16);
             end if;
             if p1_exception='1' and pipeline_stalled='0' then
                 cp0_epc <= p0_pc_restart;
@@ -990,6 +1015,9 @@ begin
         end if;
     end if;
 end process;
+
+cache_enable <= cp0_cache_control(17);
+ic_invalidate <= cp0_cache_control(16);
 
 cp0_cause_ce <= "00"; -- FIXME CP* traps merged with unimplemented opcode traps
 cp0_cause <= cp0_cause_bd & '0' & cp0_cause_ce & 
