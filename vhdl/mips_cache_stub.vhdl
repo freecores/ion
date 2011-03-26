@@ -103,6 +103,7 @@ entity mips_cache_stub is
 
         mem_wait        : out std_logic;
         cache_enable    : in std_logic;
+        ic_invalidate   : in std_logic;
 
         -- interface to FPGA i/o devices
         io_rd_data      : in std_logic_vector(31 downto 0);
