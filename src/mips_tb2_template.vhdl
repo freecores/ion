@@ -48,8 +48,7 @@ constant T : time           := 20 ns;
 -- WARNING: slite does not simulate this. The logs may be different when > 0.0!
 constant SIMULATED_UART_TX_TIME : time := 0.0 us;
 
--- Simulation length in clock cycles 
--- 2000 is enough for 'hello' sample, 22000 enough for 10 digits of pi
+-- Simulation length in clock cycles, should be long enough (you have to try...)
 constant SIMULATION_LENGTH : integer := @sim_len@;
 
 -- Simulated external SRAM size in 32-bit words 
@@ -138,6 +137,8 @@ signal cpu_code_rd_vma :    std_logic;
 signal cpu_data_wr :        t_word;
 signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
+signal cpu_ic_invalidate :  std_logic;
+signal cpu_cache_enable :   std_logic;
 
 -- interface to i/o
 signal io_rd_data :         std_logic_vector(31 downto 0);
@@ -194,13 +195,15 @@ begin
         byte_we     => cpu_byte_we,
 
         mem_wait    => cpu_mem_wait,
+        cache_enable=> cpu_cache_enable,
+        ic_invalidate=>cpu_ic_invalidate,
         
         clk         => clk,
         reset       => reset
     );
 
 
-    cache: entity work.mips_cache_stub
+    cache: entity work.mips_cache
     generic map (
         BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
         SRAM_ADDR_SIZE => 32,-- we need the full address to decode sram vs flash
@@ -224,7 +227,8 @@ begin
         data_wr         => cpu_data_wr,
                         
         mem_wait        => cpu_mem_wait,
-        cache_enable    => '1',
+        cache_enable    => cpu_cache_enable,
+        ic_invalidate   => cpu_ic_invalidate,
         
         -- interface to FPGA i/o devices
         io_rd_data      => io_rd_data,

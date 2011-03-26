@@ -57,6 +57,9 @@ signal cpu_code_rd_vma :    std_logic;
 signal cpu_data_wr :        t_word;
 signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
+signal cpu_ic_invalidate :  std_logic;
+signal cpu_cache_enable :   std_logic;
+
 
 -- interface to i/o
 signal mpu_io_rd_data :     std_logic_vector(31 downto 0);
@@ -119,6 +122,8 @@ cpu: entity work.mips_cpu
         byte_we     => cpu_byte_we,
     
         mem_wait    => cpu_mem_wait,
+        cache_enable=> cpu_cache_enable,
+        ic_invalidate=>cpu_ic_invalidate,
         
         clk         => clk,
         reset       => reset
@@ -146,7 +151,8 @@ cache: entity work.mips_cache_stub
         data_wr         => cpu_data_wr,
                         
         mem_wait        => cpu_mem_wait,
-        cache_enable    => '1',
+        cache_enable    => cpu_cache_enable,
+        ic_invalidate   => cpu_ic_invalidate,
         
         -- interface to FPGA i/o devices
         io_rd_data      => mpu_io_rd_data,
