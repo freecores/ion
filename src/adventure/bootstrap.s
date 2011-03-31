@@ -18,6 +18,11 @@
     .set UART_TX,       0x0000              # TX reg offset
     .set UART_STATUS,   0x0020              # status reg offset
 
+    #---- Cache parameters
+    .set ICACHE_NUM_LINES, 256              # no. of lines in the I-Cache
+    .set DCACHE_NUM_LINES, 256              # no. of lines in the D-Cache
+    .set DCACHE_LINE_SIZE, 4                # D-Cache line size in words
+
     #---------------------------------------------------------------------------
 
     .text
@@ -52,6 +57,9 @@ start_boot:
     nop
     la      $a0,crlf
     jal     puts
+    nop
+
+    jal     invalidate_i_cache
     nop
 
     li      $a0,FLASH_BASE
@@ -145,6 +153,27 @@ put_hex_wait_tx_rdy:
     jr      $ra
     nop
 
+# void invalidate_i_cache(void) -- invalidates all I-Cache lines (uses no RAM)
+invalidate_i_cache:
+    li      $a0,0x00010000      # Disable cache, enable I-cache line invalidation
+    mtc0    $a0,$12
+    
+    # In order to invalidate a I-Cache line we have to write its tag number to 
+    # any address while bits CP0[12].17:16=01. The write will be executed as a
+    # regular write too, as a side effect, so we need to choose a harmless 
+    # target address.
+    
+    li      $a0,XRAM_BASE
+    li      $a2,0
+    li      $a1,ICACHE_NUM_LINES-1
+    
+inv_i_cache_loop:
+    sw      $a2,0($a0)
+    blt     $a2,$a1,inv_i_cache_loop
+    addi    $a2,1
+    
+    jr      $ra
+    mtc0    $zero,$12           # Leave SR in reset state
 
 #---- Constant data (note we keep it in the text section) ----------------------
 
@@ -153,7 +182,7 @@ put_hex_table:
 
 msg0:
     .ascii  "\n\r"
-    .asciz  "Boostrapping main program at 0x"
+    .asciz  "Bootstrapping main program at 0x"
 crlf:
     .asciz "\n\r"
 space:
