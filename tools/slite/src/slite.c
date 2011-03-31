@@ -51,20 +51,8 @@
 
 /*---- Definition of simulated system parameters -----------------------------*/
 
-/* Uncomment to simulate Plasma behavior (vectors & memory mapping) */
-//#define SIMULATE_PLASMA (1)
-
-#ifdef SIMULATE_PLASMA
-
-#define VECTOR_RESET (0x00000000)
-#define VECTOR_TRAP  (0x0000003c)
-
-#else
-
 #define VECTOR_RESET (0xbfc00000)
 #define VECTOR_TRAP  (0xbfc00180)
-
-#endif
 
 /** Definition of a memory block */
 typedef struct s_block {
@@ -75,6 +63,16 @@ typedef struct s_block {
     uint8_t  *mem;
     char     *area_name;
 } t_block;
+
+#define NUM_MEM_BLOCKS      (4)
+#define NUM_MEM_MAPS        (2)
+
+/** Definition of a memory map */
+/* FIXME i/o addresses missing, hardcoded */
+typedef struct s_map {
+    t_block blocks[NUM_MEM_BLOCKS];
+} t_map;
+
 
 
 /*  Here's where we define the memory areas (blocks) of the system.
@@ -90,7 +88,6 @@ typedef struct s_block {
     When a binary file is specified in the cmd line for one of these areas, it
     will be used to initialize it, checking bounds.
 
-
     Memory decoding is done in the order the blocks are defined; the address
     is anded with field .mask and then compared to field .start. If they match
     the address modulo the field .size is used to index the memory block, giving
@@ -98,40 +95,57 @@ typedef struct s_block {
     Make sure the blocks don't overlap or the scheme will fail.
 */
 
-#define NUM_MEM_BLOCKS (3)
+#define MAP_DEFAULT (0)
+#define MAP_UCLINUX (1)
 
-#ifdef SIMULATE_PLASMA
+t_map memory_maps[NUM_MEM_MAPS] = {
+    {/* Experimental memory map (default) */
+        {/* Bootstrap BRAM, read only */
+        {VECTOR_RESET,  0x00004800, 0xf8000000, 1, NULL, "Boot BRAM"},
+        /* main external ram block  */
+        {0x00000000,    0x00080000, 0xf8000000, 0, NULL, "XRAM0"},
+        /* main external ram block  */
+        {0x80000000,    0x00080000, 0xf8000000, 0, NULL, "XRAM1"},
+        /* external flash block */
+        {0xb0000000,    0x00040000, 0xf8000000, 0, NULL, "Flash"},
+        }
+    },
 
-t_block memory_map_default[NUM_MEM_BLOCKS] = {
-    /* meant as bootstrap block, though it's read/write */
-    {VECTOR_RESET,  0x00000800, 0xf0000000, 1, NULL, "Boot BRAM"},
-    /* main external ram block  */
-    {0x80000000,    0x00001000, 0xf0000000, 0, NULL, "XRAM"},
-    /* external flash block -- not used in plasma simulation */
-    {0xb0000000,    0x00000000, 0xf0000000, 0, NULL, "Flash"},
+    {/* uClinux memory map */
+        {/* Bootstrap BRAM, read only */
+        {VECTOR_RESET,  0x00001000, 0xf8000000, 1, NULL, "Boot BRAM"},
+        /* main external ram block  */
+        {0x80000000,    0x00200000, 0xf8000000, 0, NULL, "XRAM0"},
+        {0x00000000,    0x00400000, 0xf8000000, 0, NULL, "XRAM1"},
+        /* external flash block */
+        {0xb0000000,    0x00100000, 0xf8000000, 0, NULL, "Flash"},
+        }
+    },
 };
 
-#else
-
-t_block memory_map_default[NUM_MEM_BLOCKS] = {
-    /* Bootstrap BRAM, read only */
-    {VECTOR_RESET,  0x00004800, 0xf8000000, 1, NULL, "Boot BRAM"},
-    /* main external ram block  */
-    {0x00000000,    0x00080000, 0xf8000000, 0, NULL, "XRAM"},
-    /* external flash block */
-    {0xb0000000,    0x00040000, 0xf8000000, 0, NULL, "Flash"},
-};
-
-#endif
 
 /*---- end of system parameters ----------------------------------------------*/
 
 
 /** Values for the command line arguments */
 typedef struct s_args {
+    /** memory map to be used */
+    uint32_t memory_map;
+    /** implement unaligned load/stores (don't just trap them) */
+    uint32_t do_unaligned;
+    /** start simulation without showing monitor prompt and quit on
+        end condition -- useful for batch runs */
+    uint32_t no_prompt;
+    /** breakpoint address (0xffffffff if unused) */
+    uint32_t breakpoint;
+    /** a code fetch from this address starts logging */
     uint32_t log_trigger_address;
+    /** full name of log file */
     char *log_file_name;
-    char *bin_filename[NUM_MEM_BLOCKS]; /**< bin file to load to area or null */
+    /** bin file to load to each area or null */
+    char *bin_filename[NUM_MEM_BLOCKS];
+    /** offset into area (in bytes) where bin wile will be loaded */
+    uint32_t offset[NUM_MEM_BLOCKS];
 } t_args;
 /** Parse cmd line args globally accessible */
 t_args cmd_line_args;
@@ -207,6 +221,8 @@ void slite_sleep(unsigned int value){
 /* Much of this is a remnant from Plasma's mlite and is  no longer used. */
 /* FIXME Refactor HW system params */
 
+#define DBG_REGS          (0x20010000)
+
 #define UART_WRITE        0x20000000
 #define UART_READ         0x20000000
 #define IRQ_MASK          0x20000010
@@ -251,6 +267,8 @@ typedef struct s_trace {
 typedef struct s_state {
    unsigned failed_assertions;            /**< assertion bitmap */
    unsigned faulty_address;               /**< addr that failed assertion */
+   uint32_t do_unaligned;                 /**< !=0 to enable unaligned L/S */
+   uint32_t breakpoint;                   /**< BP address of 0xffffffff */
 
    int delay_slot;              /**< !=0 if prev. instruction was a branch */
 
@@ -323,8 +341,10 @@ void usage(void);
 
 /* CPU model */
 void free_cpu(t_state *s);
-int init_cpu(t_state *s);
+int init_cpu(t_state *s, t_args *args);
 void reset_cpu(t_state *s);
+void unimplemented(t_state *s, const char *txt);
+void reverse_endianess(uint8_t *data, uint32_t bytes);
 
 /* Hardware simulation */
 int mem_read(t_state *s, int size, unsigned int address, int log);
@@ -491,6 +511,10 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
                 s->op_addr, address&0xfffffffc, mask, dvalue);
     }
 
+    if((address&0xffff0000)==DBG_REGS){
+        printf("[%04x]=%08x\n", address & 0xffff, value);
+    }
+
     switch(address){
     case UART_WRITE:
         putch(value);
@@ -569,6 +593,77 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
         printf("ERROR");
     }
 }
+
+/*-- unaligned store and load instructions -----------------------------------*/
+/*
+ These are meant to be left unimplemented and trapped. These functions simulate
+ the unaligned r/w instructions until proper trap handlers are written.
+*/
+
+void mem_swl(t_state *s, uint32_t address, uint32_t value, uint32_t log){
+    uint32_t data, offset;
+
+    if(!s->do_unaligned) return unimplemented(s, "SWL");
+
+    offset = (address & 0x03);
+    address = (address & (~0x03));
+    data = value;
+
+    while(offset<4){
+        mem_write(s,1,address+offset,(data>>24) & 0xff,0);
+        data = data << 8;
+        offset++;
+    }
+}
+
+void mem_swr(t_state *s, uint32_t address, uint32_t value, uint32_t log){
+    uint32_t data, offset;
+
+    if(!s->do_unaligned) return unimplemented(s, "SWR");
+
+    offset = (address & 0x03);
+    address = (address & (~0x03));
+    data = value;
+
+    while(offset>=0){
+        mem_write(s,1,address+offset,data & 0xff,0);
+        data = data >> 8;
+        offset--;
+    }
+}
+
+void mem_lwr(t_state *s, uint32_t address, uint32_t reg_index, uint32_t log){
+    uint32_t offset, data;
+    uint32_t disp[4] = {24,         16,         8,          0};
+    uint32_t mask[4] = {0x000000ff, 0x0000ffff, 0x00ffffff, 0xffffffff};
+
+    if(!s->do_unaligned) return unimplemented(s, "LWR");
+
+    offset = (address & 0x03);
+    address = (address & (~0x03));
+
+    data = mem_read(s, 4, address, 0);
+    data = (data >> disp[offset]) & mask[offset];
+
+    s->r[reg_index] = (s->r[reg_index] & (~mask[offset])) | data;
+}
+
+void mem_lwl(t_state *s, uint32_t address, uint32_t reg_index, uint32_t log){
+    uint32_t offset, data;
+    uint32_t disp[4] = {0,          8,          16,         24};
+    uint32_t mask[4] = {0xffffffff, 0xffffff00, 0xffff0000, 0xff000000};
+
+    if(!s->do_unaligned) return unimplemented(s, "LWL");
+
+    offset = (address & 0x03);
+    address = (address & (~0x03));
+
+    data = mem_read(s, 4, address, 0);
+    data = (data << disp[offset]) & mask[offset];
+
+    s->r[reg_index] = (s->r[reg_index] & (~mask[offset])) | data;
+}
+
 
 /*---- Optional MMU and cache implementation ---------------------------------*/
 
@@ -725,10 +820,20 @@ void cycle(t_state *s, int show_mode){
                            s->pc_next=r[rs]; break;
         case 0x0a:/*MOVZ*/ if(!r[rt]) r[rd]=r[rs];   break;  /*IV*/
         case 0x0b:/*MOVN*/ if(r[rt]) r[rd]=r[rs];    break;  /*IV*/
-        case 0x0c:/*SYSCALL*/ trap_cause = 8;
-                              s->exceptionId=1; break;
-        case 0x0d:/*BREAK*/   trap_cause = 9;
-                              s->exceptionId=1; break;
+        case 0x0c:/*SYSCALL*/ //trap_cause = 8;
+                              //s->exceptionId=1;
+                              /*
+                              FIXME enable when running uClinux
+                              printf("SYSCALL (%08x)\n", s->pc);
+                              */
+                              break;
+        case 0x0d:/*BREAK*/   //trap_cause = 9;
+                              //s->exceptionId=1;
+                              /*
+                              FIXME enable when running uClinux
+                              printf("BREAK (%08x)\n", s->pc);
+                              */
+                              break;
         case 0x0f:/*SYNC*/ s->wakeup=1;              break;
         case 0x10:/*MFHI*/ r[rd]=s->hi;              break;
         case 0x11:/*FTHI*/ s->hi=r[rs];              break;
@@ -787,18 +892,18 @@ void cycle(t_state *s, int show_mode){
     case 0x0e:/*XORI*/   r[rt]=r[rs]^imm;         break;
     case 0x0f:/*LUI*/    r[rt]=(imm<<16);         break;
     case 0x10:/*COP0*/
-        if((opcode & (1<<23)) == 0){  //move from CP0
-            if(rd == 12){
-                r[rt]=s->status;
-            }
-            else if(rd == 13){
-                r[rt]=s->cp0_cause;
-            }
-            else{
-                r[rt]=s->epc;
+        if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
+            switch(rd){
+                case 12: r[rt]=s->status; break;
+                case 13: r[rt]=s->cp0_cause; break;
+                case 14: r[rt]=s->epc; break;
+                case 15: r[rt]=0x00000200; break;
+                default:
+                    //printf("mfco [%02d]\n", rd);
+                    break;
             }
         }
-        else{                         //move to CP0
+        else{                         //move to CP0 (mtc0)
             s->status=r[rt]&1;
             if(s->processId && (r[rt]&2)){
                 s->userMode|=r[rt]&2;
@@ -808,7 +913,8 @@ void cycle(t_state *s, int show_mode){
             }
         }
         break;
-//      case 0x11:/*COP1*/ break;
+    case 0x11:/*COP1*/  unimplemented(s,"COP1");
+                        break;
 //      case 0x12:/*COP2*/ break;
 //      case 0x13:/*COP3*/ break;
     case 0x14:/*BEQL*/  lbranch=r[rs]==r[rt];    break;
@@ -823,9 +929,8 @@ void cycle(t_state *s, int show_mode){
     case 0x21:/*LH*/    //r[rt]=(signed short)mem_read(s,2,ptr,1); break;
                         start_load(s, ptr, rt, (signed short)mem_read(s,2,ptr,1));
                         break;
-    case 0x22:/*LWL*/   //target=8*(ptr&3);
-                        //r[rt]=(r[rt]&~(0xffffffff<<target))|
-                        //      (mem_read(s,4,ptr&~3)<<target); break;
+    case 0x22:/*LWL*/   mem_lwl(s, ptr, rt, 1);
+                        //printf("LWL\n");
                         break;
     case 0x23:/*LW*/    //r[rt]=mem_read(s,4,ptr,1);   break;
                         start_load(s, ptr, rt, mem_read(s,4,ptr,1));
@@ -836,20 +941,21 @@ void cycle(t_state *s, int show_mode){
     case 0x25:/*LHU*/   //r[rt]= (unsigned short)mem_read(s,2,ptr,1);
                         start_load(s, ptr, rt, (unsigned short)mem_read(s,2,ptr,1));
                         break;
-    case 0x26:/*LWR*/   //target=32-8*(ptr&3);
-                        //r[rt]=(r[rt]&~((unsigned int)0xffffffff>>target))|
-                        //((unsigned int)mem_read(s,4,ptr&~3)>>target);
+    case 0x26:/*LWR*/   mem_lwr(s, ptr, rt, 1);
+                        //printf("LWR\n");
                         break;
     case 0x28:/*SB*/    mem_write(s,1,ptr,r[rt],1);  break;
     case 0x29:/*SH*/    mem_write(s,2,ptr,r[rt],1);  break;
-    case 0x2a:/*SWL*/   //mem_write(s,1,ptr,r[rt]>>24);
-                        //mem_write(s,1,ptr+1,r[rt]>>16);
-                        //mem_write(s,1,ptr+2,r[rt]>>8);
-                        //mem_write(s,1,ptr+3,r[rt]); break;
+    case 0x2a:/*SWL*/   mem_swl(s, ptr, r[rt], 1);
+                        //printf("SWL\n");
+                        break;
     case 0x2b:/*SW*/    mem_write(s,4,ptr,r[rt],1);  break;
-    case 0x2e:/*SWR*/   break; //FIXME
-    case 0x2f:/*CACHE*/ break;
-    case 0x30:/*LL*/    //r[rt]=mem_read(s,4,ptr);   break;
+    case 0x2e:/*SWR*/   mem_swr(s, ptr, r[rt], 1);
+                        //printf("SWR\n");
+                        break;
+    case 0x2f:/*CACHE*/ unimplemented(s,"CACHE");
+                        break;
+    case 0x30:/*LL*/    //unimplemented(s,"LL");
                         start_load(s, ptr, rt, mem_read(s,4,ptr,1));
                         break;
 //      case 0x31:/*LWC1*/ break;
@@ -938,16 +1044,27 @@ void show_state(t_state *s){
 }
 
 /** Show debug monitor prompt and execute user command */
-void do_debug(t_state *s){
+void do_debug(t_state *s, uint32_t no_prompt){
     int ch;
     int i, j=0, watch=0, addr;
+    j = s->breakpoint;
     s->pc_next = s->pc + 4;
     s->skip = 0;
     s->wakeup = 0;
-    show_state(s);
-    ch = ' ';
+
+    printf("Starting simulation.\n");
+
+    if(no_prompt){
+        ch = '5'; /* 'go' command */
+        printf("\n\n");
+    }
+    else{
+        show_state(s);
+        ch = ' ';
+    }
+
     for(;;){
-        if(ch != 'n'){
+        if(ch != 'n' && !no_prompt){
             if(watch){
                 printf("0x%8.8x=0x%8.8x\n", watch, mem_read(s, 4, watch,0));
             }
@@ -955,7 +1072,7 @@ void do_debug(t_state *s){
             printf("7=Watch 8=Jump 9=Quit A=Dump\n");
             printf("L=LogTrigger > ");
         }
-        ch = getch();
+        if(ch==' ') ch = getch();
         if(ch != 'n'){
             printf("\n");
         }
@@ -991,6 +1108,7 @@ void do_debug(t_state *s){
                 }
                 cycle(s, 0);
             }
+            if(no_prompt) return;
             show_state(s);
             break;
         case 'G':
@@ -1031,15 +1149,18 @@ void do_debug(t_state *s){
             printf("Log trigger address=0x%x\n", s->t.log_trigger_address);
             break;
         }
+        ch = ' ';
     }
 }
 
 /** Read binary code and data files */
 int read_binary_files(t_state *s, t_args *args){
     FILE *in;
-    uint32_t bytes, i, files_read=0;
+    uint8_t *target;
+    uint32_t bytes=0, i, files_read=0;
 
     for(i=0;i<NUM_MEM_BLOCKS;i++){
+        bytes = 0;
         if(args->bin_filename[i]!=NULL){
 
             in = fopen(args->bin_filename[i], "rb");
@@ -1049,15 +1170,34 @@ int read_binary_files(t_state *s, t_args *args){
                 return(0);
             }
 
-            bytes = fread(s->blocks[i].mem, 1, s->blocks[i].size, in);
+            /* FIXME load offset 0x2000 for linux kernel hardcoded! */
+            //bytes = fread((s->blocks[i].mem + 0x2000), 1, s->blocks[i].size, in);
+            target = (uint8_t *)(s->blocks[i].mem + args->offset[i]);
+            while(!feof(in) &&
+                  ((bytes+1024+args->offset[i]) < (s->blocks[i].size))){
+                bytes += fread(&(target[bytes]), 1, 1024, in);
+                if(errno!=0){
+                    printf("ERROR: file load failed with code %d ('%s')\n",
+                        errno, strerror(errno));
+                    free_cpu(s);
+                    return 0;
+                }
+            }
+
             fclose(in);
-            printf("%-16s [size= %6dKB, start= 0x%08x] loaded %d bytes.\n",
-                    s->blocks[i].area_name,
-                    s->blocks[i].size/1024,
-                    s->blocks[i].start,
-                    bytes);
+
+            /* Now reverse the endianness of the data we just read, if it's
+             necessary. */
+             /* FIXME add cmd line param, etc. */
+            //reverse_endianess(target, bytes);
+
             files_read++;
         }
+        printf("%-16s [size= %6dKB, start= 0x%08x] loaded %d bytes.\n",
+                s->blocks[i].area_name,
+                s->blocks[i].size/1024,
+                s->blocks[i].start,
+                bytes);
     }
 
     if(!files_read){
@@ -1069,21 +1209,36 @@ int read_binary_files(t_state *s, t_args *args){
     return files_read;
 }
 
+void reverse_endianess(uint8_t *data, uint32_t bytes){
+    uint8_t w[4];
+    uint32_t i, j;
+
+    for(i=0;i<bytes;i=i+4){
+        for(j=0;j<4;j++){
+            w[3-j] = data[i+j];
+        }
+        for(j=0;j<4;j++){
+            data[i+j] = w[j];
+        }
+    }
+}
+
+
 /*----------------------------------------------------------------------------*/
 
 int main(int argc,char *argv[]){
     t_state state, *s=&state;
 
-    printf("MIPS-I emulator (" __DATE__ ")\n\n");
-    if(!init_cpu(s)){
-        printf("Trouble allocating memory, quitting!\n");
-        return 1;
-    };
-
     /* Parse command line and pass any relevant arguments to CPU record */
     if(parse_cmd_line(argc,argv, &cmd_line_args)==0){
         return 0;
     }
+
+    printf("MIPS-I emulator (" __DATE__ ")\n\n");
+    if(!init_cpu(s, &cmd_line_args)){
+        printf("Trouble allocating memory, quitting!\n");
+        return 1;
+    };
 
     /* Read binary object files into memory*/
     if(!read_binary_files(s, &cmd_line_args)){
@@ -1100,8 +1255,14 @@ int main(int argc,char *argv[]){
     /* Simulate a CPU reset */
     reset_cpu(s);
 
+    /* Simulate the work of the uClinux bootloader */
+    if(cmd_line_args.memory_map == MAP_UCLINUX){
+        /* FIXME this is a stub, flesh it out */
+        s->pc = 0x80002400;
+    }
+
     /* Enter debug command interface; will only exit clean with user command */
-    do_debug(s);
+    do_debug(s, cmd_line_args.no_prompt);
 
     /* Close and deallocate everything and quit */
     close_trace_buffer(s);
@@ -1256,19 +1417,28 @@ void reset_cpu(t_state *s){
     s->failed_assertions = 0; /* no failed assertions pending */
 }
 
-int init_cpu(t_state *s){
+void unimplemented(t_state *s, const char *txt){
+    /* FIXME unimplemented opcode trap */
+    printf("UNIMPLEMENTED: %s\n", txt);
+}
+
+int init_cpu(t_state *s, t_args *args){
     int i, j;
+    uint32_t k = args->memory_map;
 
     memset(s, 0, sizeof(t_state));
     s->big_endian = 1;
 
+    s->do_unaligned = args->do_unaligned;
+    s->breakpoint = args->breakpoint;
+
     /* Initialize memory map */
     for(i=0;i<NUM_MEM_BLOCKS;i++){
-        s->blocks[i].start =  memory_map_default[i].start;
-        s->blocks[i].size =  memory_map_default[i].size;
-        s->blocks[i].area_name =  memory_map_default[i].area_name;
-        s->blocks[i].mask =  memory_map_default[i].mask;
-        s->blocks[i].read_only =  memory_map_default[i].read_only;
+        s->blocks[i].start =        memory_maps[k].blocks[i].start;
+        s->blocks[i].size =         memory_maps[k].blocks[i].size;
+        s->blocks[i].area_name =    memory_maps[k].blocks[i].area_name;
+        s->blocks[i].mask =         memory_maps[k].blocks[i].mask;
+        s->blocks[i].read_only =    memory_maps[k].blocks[i].read_only;
 
         s->blocks[i].mem = (unsigned char*)malloc(s->blocks[i].size);
 
@@ -1287,34 +1457,54 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
     uint32_t i;
 
     /* fill cmd line args with default values */
+    args->memory_map = MAP_DEFAULT;
+    args->do_unaligned = 0;
+    args->no_prompt = 0;
+    args->breakpoint = 0xffffffff;
+    args->log_file_name = "sw_sim_log.txt";
+    args->log_trigger_address = VECTOR_RESET;
     for(i=0;i<NUM_MEM_BLOCKS;i++){
         args->bin_filename[i] = NULL;
-        args->log_file_name = "sw_sim_log.txt";
-        args->log_trigger_address = VECTOR_RESET;
+        args->offset[i] = 0;
     }
 
     /* parse actual cmd line args */
     for(i=1;i<argc;i++){
         if(strcmp(argv[i],"--plasma")==0){
-            #ifdef SIMULATE_PLASMA
-                /* program compiled for plasma compatibility, no problem */
-            #else
-                /* program compiled for mips-1 compatibility, error*/
-                printf("Error: program compiled for compatibility to MIPS-I\n");
-                return 0;
-            #endif
+            /* plasma simulation not supported, error*/
+            printf("Error: program compiled for compatibility to MIPS-I\n");
+            return 0;
+        }
+        else if(strcmp(argv[i],"--uclinux")==0){
+            args->memory_map = MAP_UCLINUX;
+            /* FIXME selecting uClinux enables unaligned L/S emulation */
+            args->do_unaligned = 1;
+        }
+        else if(strcmp(argv[i],"--unaligned")==0){
+            args->do_unaligned = 1;
+        }
+        else if(strcmp(argv[i],"--noprompt")==0){
+            args->no_prompt = 1;
         }
         else if(strncmp(argv[i],"--bram=", strlen("--bram="))==0){
             args->bin_filename[0] = &(argv[i][strlen("--bram=")]);
         }
         else if(strncmp(argv[i],"--flash=", strlen("--flash="))==0){
-            args->bin_filename[2] = &(argv[i][strlen("--flash=")]);
+            args->bin_filename[3] = &(argv[i][strlen("--flash=")]);
         }
         else if(strncmp(argv[i],"--xram=", strlen("--xram="))==0){
             args->bin_filename[1] = &(argv[i][strlen("--xram=")]);
         }
+        else if(strncmp(argv[i],"--kernel=", strlen("--kernel="))==0){
+            args->bin_filename[1] = &(argv[i][strlen("--kernel=")]);
+            /* FIXME uClinux kernel 'offset' hardcoded */
+            args->offset[1] = 0x2000;
+        }
         else if(strncmp(argv[i],"--trigger=", strlen("--trigger="))==0){
             sscanf(&(argv[i][strlen("--trigger=")]), "%x", &(args->log_trigger_address));
+        }
+        else if(strncmp(argv[i],"--breakpoint=", strlen("--breakpoint="))==0){
+            sscanf(&(argv[i][strlen("--breakpoint=")]), "%x", &(args->breakpoint));
         }
         else if((strcmp(argv[i],"--help")==0)||(strcmp(argv[i],"-h")==0)){
             usage();
@@ -1336,8 +1526,15 @@ void usage(void){
     printf("Arguments:\n");
     printf("--bram=<file name>      : BRAM initialization file\n");
     printf("--xram=<file name>      : XRAM initialization file\n");
+    printf("--kernel=<file name>    : XRAM initialization file for uClinux kernel\n");
+    printf("                          (loads at block offset 0x2000)\n");
     printf("--flash=<file name>     : FLASH initialization file\n");
     printf("--trigger=<hex number>  : Log trigger address\n");
     printf("--plasma                : Simulate Plasma instead of MIPS-I\n");
+    printf("--uclinux               : Use memory map tailored to uClinux\n");
+    printf("--unaligned             : Implement unaligned load/store instructions\n");
+    printf("--noprompt              : Run in batch mode\n");
+    printf("--stop_at_zero          : Stop simulation when fetching from address 0x0\n");
     printf("--help, -h              : Show this usage text\n");
 }
+
