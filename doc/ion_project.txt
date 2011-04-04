@@ -4,7 +4,9 @@ mostly usage instructions for the test samples and custom utilities.
 In its present state it' more a reminder to myself than a proper explaination of
 the system.
 
-Last modified: Feb/08/2011
+Last modified: Apr/04/2011
+
+TO BE DONE: Some stub cache timing diagrams still missing.
 
 Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
@@ -14,9 +16,8 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 1.- Introduction
 ================================================================================
 
-    This is a MIPS-I compatible CPU, implementing enough of the MIPS-I
-    architecture to be used with a standard mips C toolchain. It is meant as
-    a starting point for a MIPS-32/r1 core.
+    This is a MIPS-I compatible CPU, aiming at compatibility with IDT's R3000 
+    MIPS derivative.
 
 1.1.- Project goals
 
@@ -27,6 +28,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         Excluding unaligned load/store (formerly patented).
         Excluding all CPA instructions.
         Excluding all CP0 instructions related to TLB.
+        Cache instructions may or may not be implemented, I'll see.
     2.- Catch all undefined opcodes (and trigger exception).
     3.- Operate in kernel/user mode as per the architecture definition.
     4.- Handle exceptions in a manner compatible to MIPS-I standard.
@@ -37,8 +39,6 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         (I.e. don't not consider stalls, interlocks, etc. yet)
     7.- Interlock behavior of MUL/DIV and L* compatible to toolchain.
         That is, interlock loads instead of relying on a delay slot.
-        The reason is that it might not be easy to set up the toolchain to
-        produce bona-fide mips1 code in this regard; I have to test.
 
     Unaligned load/stores are excluded not because of patent concerns (the
     patents already expired) but because they're not essential for a first
@@ -51,7 +51,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     2.- External interrupt support.
     3.- Code cache and data cache, even if not standard.
         No MMU and no TLB, and no cache-related instructions.
-    4.- Interface to external SRAM on 16-bit data bus.
+    4.- Interface to external SRAM (or FLASH) on 8- and 16-bit data bus.
 
 
     Many of the above goals have already been accomplished.
@@ -62,18 +62,21 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     In its present state, the CPU can pass a basic opcode test and can execute
     some basic MIPS-I code compiled with standard gcc tools (specifically, it
-    can run a tiny 'hello world' program, see section 6).
+    can run an 'Adventure' demo and a tiny 'hello world' program, see 
+    section 6).
     'Basic' means that the core has a number of limitations that prevent it from
     running just any code -- mostly unimplemented instructions and skeletal
     memory interface.
     
-    Besides, the core can already access external static SRAM on a 16-bit bus, 
-    as the one present in the DE-1 board, with no wait states yet (the DE-1
-    SRAM happens not to need them and that's why they're still unimplemented).
+    Besides, the core can already access external static memory (SRAM or FLASH)
+    on 8-bit and/or 16 bit buses. 
+    My main development target is a DE-1 board from Terasic (Cyclone-2) which
+    happens to have that kind of memory on it.
+    Wait states can be configured at synthesis, see section 2.6 below.
     Code sample 'memtest' takes advantage of this to do a basic test of the
-    external SRAM.
+    external SRAM, and code sample 'Adventure' uses both Flash and SRAM.
     
-    
+
     The opcode test is included in '/src/opcodes/opcodes.s' (see section 6).
 
 
@@ -84,10 +87,10 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         - RTE instruction -- as of now, returns from traps with JR.
         - Most of the CP0 registers and of course all of the CP1.
         - External interrupts.
+        - Caches (there's an empty 'stub' cache and an unfinished real cache)
 
     ### Things implemented but not fully tested.
-        - Memory pause input -- tested with a stub cache module only, it will
-          most certainly change.
+        - Memory pause input -- work in progress along with the cache module.
 
     ### Things with provisional implementation
 
@@ -102,18 +105,15 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
             The interlock logic needs a stronger test bench anyway.
         2.- Documentation is too sparse and source code is barely commented.
             This is critical and I plan to fix it ASAP.
-        3.- The MPU template is not suitable for synthesis on Xilinx hardware --
-            it will use much more memory than necessary. I have to replace the
-            four rom 8-bit slices with a single 32-bit block. Slices were needed
-            to support write cycles on BRAM but the new MPU template does not
-            do that. Changes needed in the template and the python script.
-            
+
 
     ### Performance
     
     In my main test system, a Cyclone-2 grade -7, I'm quite sure that the core
-    with no caches but with mul/div and all other necessary functionality
-    will be below 1800 LEs, running at least at 50 MHz.
+    with caches and with mul/div and all other necessary functionality, plus 
+    a barebones UART, will be below 2500 LEs, running at least at 50 MHz (with
+    'balanced optimization' on Quartus-II).
+    
     
     As soon as the core is in a stable state I will include a few synthesis
     performance numbers for common configurations.
@@ -123,10 +123,10 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     * Implement efficient load interlock detection with no wasted cycles.
     * Add a couple other code samples, including one with FP arithmetic.
-    * Add support for slow static memory (i.e. FLASH) so bigger programs can 
-      be run without wasting internal BRAM.
+    * Modify the software simulator so it can boot uClinux.
+    * Make a uClinux port suitable for a R3000 derivative, from BuildRoot.
 
-    
+
 
 
 
@@ -147,23 +147,26 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     has three separate, independent buses: code read, data read and data write.
 
     The CPU will perform opcode fetches at the same time it does data reads
-    and/or writes. This is not only faster than a Von Neumann architecture where
+    or writes. This is not only faster than a Von Neumann architecture where
     all memory cycles have to be bottlenecked through a single bus; it is much
     simpler too. And most importantly, it matches the way the CPU will work
     when connected to code and data caches.
 
     (Actually, in the current state of the core, due to the inefficient way in
     which load interlocking has been implemented, the core is less efficient
-    than that -- more on this later.)
+    than that -- more on this later).
 
     The core can't read and write data at the same time; this is a fundamental 
     limitation of the core structure: doing both at the same time would take 
-    one more read port in the register bank -- too expensive.
+    one more read port in the register bank -- too expensive. Besides, it's not
+    necessary given the 3-stage pipeline structure we use.
 
     In the most basic use scenario (no external memory and no caches), code and
     data buses have a common address space but different storages and the
     architecture is strictly Harvard. As soon as caches and external memory are
-    implemented, the architecture will be Modified Harvard.
+    implemented, the architecture will be Modified Harvard -- because data and 
+    code will ultimately come from the same storage, on the same exetrnal 
+    bus(es).
 
     Note that the basic cpu module (mips_cpu) is meant to be connected to 
     internal, synchronous BRAMs only. Some of its outputs are not registered
@@ -189,7 +192,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     where there is no interlock -- interlock is discussed in section 2.3.
 
 
-    ==== Chronogram 1.A: data read cycle, no stall ========================
+    ==== Chronogram 2.2.1.A: data read cycle, no stall ====================
                          ____      ____      ____      ____      ____
      clk            ____/    \____/    \____/    \____/    \____/    \____/
 
@@ -204,7 +207,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
               (data is registered here...)--^    (...and here)--^
 
-     ==== Chronogram 1.B: code read cycle, no stall =======================
+     ==== Chronogram 2.1.1.B: code read cycle, no stall ===================
                          ____      ____      ____      ____      ____
      clk            ____/    \____/    \____/    \____/    \____/    \____/
 
@@ -247,7 +250,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     This is the waveform for a basic write cycle.
 
-    ==== Chronogram 2: data write cycle ===================================
+    ==== Chronogram 2.1.2: data write cycle ===============================
                          ____      ____      ____      ____      ____
      clk            ____/    \____/    \____/    \____/    \____/    \____/
 
@@ -273,17 +276,21 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 2.1.3 Memory wait cycles
 
     Memory wait cycles have already been implemented and tested with a 'stub'
-    cache (module mips_cache_stub). This 'cache' is actually just an interface
-    to external 16-bit wide memory that has only been barely tested on real 
-    hardware.
-    The memory wait state logic works with this stub module but I expect it to 
-    change when the final cache implementation is done.
+    cache (module mips_cache_stub) and the first version of the real cache
+    (module mips_cache.vhdl). The 'stub cache' is actually just an interface
+    to external 8/16-bit wide memory that has only been barely tested on real 
+    hardware. This stub cache is described in section 2.7 below while the real
+    cache is descibed in section 2.8.
+    The memory wait state logic is a work in progress and might change as 
+    development on the cache module proceeds.
 
     In short, the 'mem_wait' input will unconditionally stall all pipeline
     stages as long as it is active. It is meant to be used by the cache at cache 
-    misses.
+    refills.
 
-    Little more to say until this is done and tested...
+    Again, the current implementation of the wait input and its logic is going
+    to change. Eventually it will be described here.
+
     
 
 
@@ -318,7 +325,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     Here's a couple of examples:
     
 
-    ==== Chronogram 3.A: stages for instruction "lui gp,0x1" ==============
+    ==== Chronogram 2.2.A: stages for instruction "lui gp,0x1" ============
                          ____      ____      ____      ____      ____
      clk            ____/    \____/    \____/    \____/    \____/    \____/
 
@@ -330,7 +337,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
      
                         |< fetch0>|<   0   >|<   1   >|
                         
-    ==== Chronogram 3.B: stages for instruction "lw a0,16(v0)" ============
+    ==== Chronogram 2.2.B: stages for instruction "lw a0,16(v0)" ==========
                          ____      ____      ____      ____      ____
      clk            ____/    \____/    \____/    \____/    \____/    \____/
 
@@ -460,7 +467,9 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     But all succeeding versions of the MIPS architecture, including the MIPS-32
     that this core aims to be compatible with in the future, implement a 
     different scheme instead, 'load interlock' ([1], pag. 28).
-    In short, it pays to implement load interlocks so this core does.
+    In short, it pays to implement load interlocks so this core does, but the
+    feature should be optional through a generic.
+    
     
     Load interlock is triggered in stage 1 (ALU/MEM) of the load instruction;
     when triggered, the pipeline stages 0 and 1 stall, but the pipeline stage
@@ -475,7 +484,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     fixed.
 
 
-    ==== Chronogram 4: data read cycle, showing interlock ======================
+    ==== Chronogram 2.3.A: data read cycle, showing interlock =============
                          ____      ____      ____      ____      ____
      clk            ____/    \____/    \____/    \____/    \____/    \____/
 
@@ -484,7 +493,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
      byte_we        XXXX|  0000   |  1111   |  0000   |  0000   |  1100   |
      
                                             |<                 >|
-                    ________________________           ____________________             
+                    ________________________           ____________________
      code_rd_vma                            \_________/               
                                              _________                    
      data_rd_vma    ________________________/         \____________________
@@ -517,7 +526,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     find a better example in the listing files...).
 
 
-2.5 Exceptions
+2.4 Exceptions
 
     The only exceptions supported so far are software exceptions, and of those 
     only the instructions BREAK and SYSCALL and the unimplemented opcode trap.
@@ -539,7 +548,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     ERET is not implemented yet, because privilege levels aren't either.
 
 
-2.6.- Multiplier
+2.5.- Multiplier
 
     As of revision 18, the core already includes a multiplier module.
     
@@ -558,22 +567,341 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     explaining and some ascii chronogram. Again, TBD.
 
 
-2.7.- Cache
+2.6.- Memory map definition
+
+    The system memory map is hardcoded in function 'decode_address_mips1', 
+    defined in package 'mips_pkg.vhdl'.
+
+    The MIPS architecture specs define a memory map which determines which areas
+    are cached and which is the default address translation ([2], page 2-8).
+    
+    The core as of now does not support any kind of memory translation: program 
+    addresses are always identical to hardware addresses.
+    The memory map attributes are only relevant to the cache module; the cache 
+    is the only module responsible for accessing external storage; it needs to 
+    know how to do it. for each address, the cache needs to know:
+    
+        a.- What kind of memory it is
+        b.- How many wait states to use
+        c.- Whether it is readable or not
+        d.- Whether it is cacheable or not
+        
+    In the present implementation the memory map can't be modified at run time.
+    
+    The cache module uses 'decode_address_mips1' to determine what to do for 
+    each cache refill -- the refill state mechine is different for each kind of 
+    memory, see section 2.7. 
+    
+    Note that the cache stub implements only points a, b and c.
+
+
+2.7.- 'Stub' cache
 
     As of revision 53, there is a first synthesizable version of the cache, a 
     'stub' with almost no functionality meant to bring the system up.
-    the cache in its present state (rev. 53) is just an interface to external
+    The cache in its present state (rev. 53) is just an interface to external
     static RAM and internal FPGA block RAM as read-only, plus some minimal
     support for I/O (used to access the UART).
-    It will be used to test the cache logic with a very simplified system (a 
-    single word for code and data instead of the more usual 1K-word).
+    It is functionally equivalent to a 1-word data and code cache which always 
+    misses. It is only good for interfacing the CPU to external memory, it does
+    not provide any performance gain.
     
-    The code is quite messy and uncommented; and I'm not going to write any 
-    explainations here just yet (no time). Yet, the logic is relatively simple
-    (no matter how ugly the code is) and fast enough not to bring the system 
-    speed below my 50 MHz informal target. So I think I'm on the good track.
+    Line size is 1 word for both data and code. That is, all refills are for
+    one single word.
     
-    Information and diagrams ASAP.
+    
+2.7.1.- Stub cache refill timing diagrams
+    
+    
+    For each type of memory supported by the cache there is a refill state 
+    machine (i.e. a path within the cache state machine). Rather than drawing 
+    the state machine diagram I will draw the memory access chronograms for
+    each kind of memory.
+    
+    I expect that much of what I will write here is readily apparent by 
+    examining the state machine transition logic, I hope this will help clarify
+    everything.
+    
+    *** Block RAM **********************************************************
+    
+    Block RAM (internal synchronous FPGA RAM) is only supported for code read
+    accesses of 32-bit words. The type of memory is meant for startup code and
+    small debug applications so speed is not important.
+    
+
+    ==== Chronogram 2.7.1.A: code refill from block RAM ====================
+    
+                       __    __    __    __    __    __    __    __    __
+     clk            __/  \__/  \__/  \__/  \__/  \__/  \__/  \__/  \__/  \_
+
+     code_rd_addr   XX| 0x099c                      | 0x09a0            ...
+     
+                            |<    stalled          >|     |< stalled ...>
+                       _____                         _____
+     code_rd_vma    __/     \_______________________/     \________________
+
+     cache/ps       XX|idle       |[1]  |[2]  |[3]  |idle       |[1]  |[2]  |[3] 
+                             _____                         _____
+     code_miss      ________/     \_______________________/     \__________
+     
+                    __       _______________________       ________________
+     cpu_mem_wait     \_____/                       \_____/
+
+
+     bram_rd_addr     XXXXXXXXXXXX| 0x009c                      | 0x009a
+    
+     bram_rd_data     XXXXXXXXXXXXXXXXXX| 0x12345678                   |...
+
+    ========================================================================
+
+    The diagram shows two such code refills back to back. The BRAM address in
+    this example is just the low 8 bits of the full address.
+
+    In the diagram, 'ps' is the 'present state' register of the cache state 
+    machine, and the states are labeled as this:
+    
+        [1] = code_refill_bram_0
+        [2] = code_refill_bram_1
+        [3] = code_refill_bram_2
+        
+    As you see we're in no hurry... 5 cycles to read a word from a 32-bit wide 
+    BRAM is a lot, but this is what we pay for not using a dedicated data path 
+    for each kind of memory.
+    
+    
+    *** Static 16-bit memory (SRAM in the DE-1 board) **********************
+    
+    This is a BRAM refill (like the one pictured above) followed by a static
+    refill with 1 wait state:
+    
+    
+    ==== Chronogram 2.7.1.B: code refill from static 16-bit memory =========
+
+                      _   _   _   _   _   _   _   _   _   _   _   _   _   _
+     clk            _/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \
+
+     code_rd_addr   X| 0x0004            | 0x0008                | 0x000c
+                         |<    stalled  >|   |< stalled         >|
+                      ___                 ___                     ___
+     code_rd_vma    _/   \_______________/   \___________________/     ...
+
+     cache/ps       X|idle   | 1 | 2 | 3 |idle   | 5     | 6     |
+                    _     _______________     ___________________
+     cpu-mem_wait    \___/               \___/                   \___  ...
+                          ___                 ___
+     code_miss      _____/   \_______________/   \___________________  ...
+                                              ___     ___
+     load_ws_ctr    _________________________/   \___/   \___________  ...
+     
+     ws_value       XXXXXXXXXXXXXXXXXXXXXXXXX| 1 |XXX| 1 |XXXXXXXXXXX  ...
+     
+     ws_ctr             0                        | 1 | 0 | 1 | 0       ...
+
+     sram_addr      XXXXXXXXXXXXXXXXXXXXXXXXXXXXX| 0x021 | 0x023 |XXX  ...
+    
+     sram_data_rd   -----------------------------< 0x1234| 0x5678>---  ...
+                    _____________________________                 __
+     sram_oe_n                                   \_______________/     ...
+
+    ========================================================================
+    
+    Bus sram_addr is the address bus pyhsically connected to external static
+    memories, both 16-bit and 8-bit wide. 16-bit devices are not connected to
+    sram_addr(0); that bit is left at '1' on 16-bit accesses and we can ignore
+    it in this example.
+    
+    You can see that the target 32-bit word at address 0x08 is read over two
+    consecutive memory cycles of two clock cycles each (one of which is a wait
+    state). The code word is read MSB half first, in this example the code
+    word is 0x012345678.
+    
+    Since each 32-bit word takes up 2 16-bit words, the target word is at SRAM 
+    location 0x08*2=0x010, which becomes 0x020 when we take bit sram_addr(0)
+    into account. 
+    
+    This explains the values 0x021 and 0x023 for sram_addr. I hope this 
+    explaination made sense...
+    
+    The states are labelled like this:
+    
+        [1] = code_refill_bram_0
+        [2] = code_refill_bram_1
+        [3] = code_refill_bram_2
+        [4] = code_refill_sram_0
+        [5] = code_refill_sram_1
+    
+    Signals ws_ctr, ws_value and load_ws_ctr are all related to the wait state
+    counter (ws_ctr). 
+    
+    A number of cases are still to be documented:
+    
+        Code refill from 8-bit static memory.
+        Data refill from 16-bit static memory.
+        Data refill from 8-bit static memory.
+        Data refill from 32-bit sync IO memory.
+        Data refill from 32-bit BRAM memory.
+    
+    They are all easy to figure by reading the source but I will add a diagram 
+    as soon as possible.
+    
+
+2.7.2.- Stub cache writethrough timing diagrams
+    
+    The stub bache only supports writes to static 16-bit RAM and synchronous
+    32-bit IO ports.
+    
+    The following diagram shows a code refill from 16-bit SRAM followed by a 
+    writethrough to 16-bit SRAM.
+    Note that the code refill always happens before any other cache operation.
+    And note that the code word being read is NOT the write instruction but
+    the one after it.
+    
+    
+    ==== Chronogram 2.7.2.A: writethrough to static 16-bit memory ==========
+
+                      _   _   _   _   _   _   _   _   _   _   _   _   _   _
+     clk            _/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \
+
+     code_rd_addr   X| 0x0008                                        | 0x000c
+                         |<    stalled                              >|
+                      ___                                             ___
+     code_rd_vma    _/   \___________________________________________/   \
+
+     cache/ps       X|idle   | 5     | 6     | 7 | 8 | 9 | A | B | C |idle
+                    _     ___________________________________________
+     cpu-mem_wait    \___/                                           \___/
+                          ___     ___
+     load_ws_ctr    _____/   \___/   \___________________________________
+     
+     ws_ctr          0       | 1 | 0 | 1 | 0       
+
+     sram_addr      XXXXXXXXX| 0x021 | 0x023 | 0xff5     | 0xff7     |XXXX
+    
+     sram_data_rd   ---------< 0x1234| 0x5678>----------------------------
+     
+     sram_data_wr   -------------------------< 0xabcd    | 0xef01    >----
+                    _________                 ____________________________
+     sram_oe_n               \_______________/     
+                       __________________________     _______     ________
+     sram_byte_we_n(1)                           \___/       \___/
+                       __________________________     _______     ________
+     sram_byte_we_n(0)                           \___/       \___/
+
+    ========================================================================
+    
+    State labels:
+    
+        [5] = code_refill_sram_0
+        [6] = code_refill_sram_1
+        [7] = data_writethrough_sram_0a
+        [8] = data_writethrough_sram_0b
+        [9] = data_writethrough_sram_0c
+        [A] = data_writethrough_sram_1a
+        [B] = data_writethrough_sram_1b
+        [C] = data_writethrough_sram_1c
+    
+    In order to guarantee the address and data setup and hold times we have 
+    to use 3 clock cycles per write cycle. This is very slow but there is no way
+    around it if we want a fully synchronous design. Unlike the refill, which
+    has 1 wait state, the writethrough doesn't need any -- for the chips on the
+    DE-1 board. Wait states are configured in the package mips_pkg.
+    
+    Note this architecture always writes whole words (because SWR, SWL are 
+    unimplemented) so the byte enables are always asserted together.
+
+
+    ==== Chronogram 2.7.2.B: writethrough to synchronous 32-bit IO =========
+
+                      _   _   _   _   _   _   _   _   _   _   _   _   _   _
+     clk            _/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \_/ \
+
+     code_rd_addr   X| 0x0004            | 0x0008            | 0x000c
+                         |<    stalled  >|   |< stalled     >|   
+                      ___                 ___                 ___
+     code_rd_vma    _/   \_______________/   \_______________/   \_________
+
+     cache/ps       X|idle   | 1 | 2 | 3 | D | i | 1 | 2 | 3 |idle   | ...
+                    _     _______________     _______________     ____
+     cpu-mem_wait    \___/               \___/               \___/     ...
+                          ___                 ___                 ___
+     code_miss      _____/   \_______________/   \_______________/   \ ...
+
+     io_byte_we      0                   |f  | 0                       ...
+
+    ========================================================================
+
+    State labels:
+
+        [i] = idle
+        [1] = code_refill_bram_0
+        [2] = code_refill_bram_1
+        [3] = code_refill_bram_2
+        [D] = data_write_io_0
+
+    IO ports are not meant to be cached and will not be in the final version of
+    the cache. But the writethrough needs to be implemented in the state 
+    machine at any rate.
+    Note that the IO byte we signals are all asserted at once in the current 
+    implementation of the core (because no half-word or unaligned stores are
+    supported).
+
+
+
+2.8.- Cache module ('real' cache as opposed to the 'stub' above)
+
+    As of revision 114, the project already includes a real cache module, still
+    unfinished. Both the simulation template and the synthesis template still
+    use the stub cache by default, so if you want to test the real cache you 
+    have to modify the templated manually.
+    
+    Only the I-Cache is implemented; the D-Cache still uses the stub logic from
+    the mips_cache_stub module. Besides, SDRAM is not supported yet. And there
+    are a number of loose ends in the implementation still to be solved. For
+    example, the cache size is supposed to be parametrizable through generics; 
+    but though the generics are already there, the actual code does not use them
+    and uses hardcoded constants instead. There's many things like this
+    still unfinished.
+    
+    As time permits I will add timing diagrams to this section. For now, I will
+    only say that the timing diagrams will be nearly identical to those of the
+    stub cache with only one important difference: In the stub cache, each 
+    refill operation only reads a single word from memory, whereas in the real 
+    cache each refill reads 4 words in reverse order (i.e. 3, 2, 1, 0 LSB 
+    address bits).
+
+
+2.8.1.- Cache initialization and control
+
+    Bits 17 and 16 of the SR are NOT used for their standard MIPS-I purpose.
+    Instead they are used as explained below:
+    
+    - Bit 17: Cache enable              [reset value = 0]
+    
+        When '0', caches are disables. All memory accesses will trigger a 
+        cache refill (even sucessive accesses to the same line).
+        When '1', caches are enabled and work as usual.
+    
+    - Bit 16: I-Cache line invalidate   [reset value = 0]
+    
+        When bits 17:16='01', writing word X.X.X.N to ANY address will 
+        invalidate I-Cache line N (N is an 8-bit word and X is an 8-bit 
+        don't care).
+        Besides, the actual write will be performed too.
+        When bit 16 is '0', the cache will work as usual.
+        When bits 17:16='11' cache behavior is UNDETERMINED.
+
+    Now, after reset the cache memory comes up in an undetermined state but 
+    it comes up disabled too. Before enabling it, you need to invalidate all
+    cache lines in software (see routine cache_init in the memtest sample).
+    
+    Note that there are no 'uncached' memory areas in the current version of
+    the core; all memory addresses are cacheable unless they are defined as
+    IO (see mips_cache.vhdl). 
+
+
+2.8.2.- Cache tags, cache address mirroring and uncacheable blocks
+
+    FIXME This is explained in the cache source; should be explained here too
 
 
 
@@ -600,7 +928,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     There are a few simulation test bench templates in the /src directory, which 
     are used by all the code samples (and there's just two code samples in this 
     release of the project...). 
-    The onl one actually useful is '/src/mips_tb2_template.vhdl'. The others
+    The only one actually useful is '/src/mips_tb2_template.vhdl'. The others
     are remnants of previous versions that will be removed ASAP.
     
     The template in file '/src/mips_tb2_template.vhdl' is filled in with all 
@@ -623,7 +951,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     '/vhdl/tb/mips_tb<i>.vhdl', though there's only one right now -- please 
     see the source sample makefiles.
     
-    As of revision 70, you should use mips_tb2 for all code samples.
+    As of revision 70 and above, you should use mips_tb2 for all code samples.
 
     The test bench file is automatically generated for each of the sample
     programs (because it contains initialized memories with the program object
@@ -846,18 +1174,16 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 4.1.- Pre-generated demo
 
-    The project includes two synthesizable code samples, a 'Hello world' demo
+    The project includes 3 synthesizable code samples, a 'Hello world' demo
     and a memory tester. Only the 'hello' demo is included in pre-generated 
-    form, the other has to be built using the included makefile.
+    form, the others have to be built using the included makefiles.
 
-
-    One of the code samples is included pre-generated, the 'hello world' code 
-    sample.
     This is just for convenience, so that you can launch some demo on hardware
     without installing the C toolchain.
     
     A constraints file is provided ('/vhdl/demo/c2sb_demo.csv') which includes
-    all the pin constraints for the default target board, in CSV format.
+    all the pin constraints for the default target board, in CSV format. This
+    constraints file is shared by all demos targeted to the DE-1 board.
 
     This demo has only been tested on a single dev board: terasIC's DE-1,
     with a Cyclone-II FPGA (EP2C20F484C7).
@@ -894,11 +1220,11 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     In case you need to troubleshoot, my synthesis of the default demo is
     usually like this:
 
-        - Selected optimization: area
+        - Selected optimization: balanced
         - All other options: default
-        - <1900 LEs plus 14 M4K blocks
+        - <2250 LEs plus 27 M4K blocks if you use the real cache
         - Clock constraint met but not by much (~53 MHz)
-        - ~17 warnings, mostly harmless (ugliest: unused pins, undeclared clock)
+        - <60 warnings, mostly harmless (ugliest: unused pins, undeclared clock)
 
     Note that none of the on-board goodies are used in the demo except as noted
     in section 4.2 below.
@@ -916,7 +1242,8 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     I will only deal here with the 'hello' demo.
 
-    The demo should be easily portable to any board which has all of this:
+    The 'hello' demo should be easily portable to any board which has all of 
+    this:
 
         - An FPGA capable enough (the demo uses internal memory only)
         - A reset pin (possibly a pushbutton)
@@ -944,14 +1271,34 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     tried it on Quartus and ISE). Specifically, it does not instance memory
     blocks (relying instead on memory inference) or clock managers or buffers.
     This has its drawbacks but is an stated goal of the project -- in the long
-    run it pays, I think. Vendor-specific hardware has its uses but should not
-    be instantiated needlessly.
+    run it pays, I think.
 
 
     The memory test demo, on the other hand, uses the external static RAM on
     the DE-1 board. Porting it involves only adapting the memory interface 
     signals and should be quite straightforward. You're on your own, though.
      
+4.3 'Adventure' demo
+
+    There is a second demo targeting the same hardware as the hello demo above:
+    a port of 'Adventure'. The C source (included) has been slightly modified
+    to not use any library functions nor any fulesystem (instead uses a built-in
+    constant string table).
+    
+    Build steps are the same as for the hello demo (the make target is 
+    adventure_demo). 
+    
+    Since the binary executable is too large to fit internal BRAM, it has to be 
+    executed from the DE-1 onboard flash. You need to write file adventure.bin
+    to the start of the FLASH using the 'Control Panel' tool that came with your
+    DE-1 board. That's the only salient difference.
+    
+    The game will offer you an auto-walkthrough option. Answer 'y' and it will
+    play itself for about 250 moves, leaving you at an intermediate stage of 
+    the game from which you can play on. 
+    
+    Running Adventure on a computer built by myself is just something I wanted 
+    to do :) besides, it serves a useful purpose as a confidence builder.
 
 
 5.- Tools
@@ -959,6 +1306,10 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 
 5.1.- MIPS software simulator
+
+    (NOTE: as of rev. 114 the SW simulator has some features not explained here;
+    please see the sources for a very brief explaination. I'll update the doc
+    ASAP)
 
     Plasma project includes a MIPS-I simulator made by Steve Rhoads, called
     'mlite.c'. According the the author, it was used as a golden model for the
