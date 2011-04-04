@@ -4,4 +4,5 @@
     --flash=flash.bin ^
     --trigger=bfc00000 ^
     --noprompt ^
+    --small
     
