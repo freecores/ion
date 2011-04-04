@@ -65,7 +65,7 @@ typedef struct s_block {
 } t_block;
 
 #define NUM_MEM_BLOCKS      (4)
-#define NUM_MEM_MAPS        (2)
+#define NUM_MEM_MAPS        (3)
 
 /** Definition of a memory map */
 /* FIXME i/o addresses missing, hardcoded */
@@ -97,6 +97,7 @@ typedef struct s_map {
 
 #define MAP_DEFAULT (0)
 #define MAP_UCLINUX (1)
+#define MAP_SMALL   (2)
 
 t_map memory_maps[NUM_MEM_MAPS] = {
     {/* Experimental memory map (default) */
@@ -119,6 +120,18 @@ t_map memory_maps[NUM_MEM_MAPS] = {
         {0x00000000,    0x00400000, 0xf8000000, 0, NULL, "XRAM1"},
         /* external flash block */
         {0xb0000000,    0x00100000, 0xf8000000, 0, NULL, "Flash"},
+        }
+    },
+
+    {/* Experimental memory map with small XRAM */
+        {/* Bootstrap BRAM, read only */
+        {VECTOR_RESET,  0x00004800, 0xf8000000, 1, NULL, "Boot BRAM"},
+        /* main external ram block  */
+        {0x00000000,    0x00001000, 0xf8000000, 0, NULL, "XRAM0"},
+        /* main external ram block  */
+        {0x80000000,    0x00001000, 0xf8000000, 0, NULL, "XRAM1"},
+        /* external flash block */
+        {0xb0000000,    0x00040000, 0xf8000000, 0, NULL, "Flash"},
         }
     },
 };
@@ -1479,6 +1492,9 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
             args->memory_map = MAP_UCLINUX;
             /* FIXME selecting uClinux enables unaligned L/S emulation */
             args->do_unaligned = 1;
+        }
+        else if(strcmp(argv[i],"--small")==0){
+            args->memory_map = MAP_SMALL;
         }
         else if(strcmp(argv[i],"--unaligned")==0){
             args->do_unaligned = 1;
