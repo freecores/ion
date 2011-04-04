@@ -2,6 +2,9 @@
 -- ION MIPS-compatible CPU demo on Terasic DE-1 Cyclone-II starter board
 --##############################################################################
 -- This module is little more than a wrapper around the CPU and its memories.
+-- Synthesize with 'balanced' optimization for best results.
+--------------------------------------------------------------------------------
+-- NOTE: See note at bottom of file about optional use of PLL.
 --##############################################################################
 
 library ieee;
@@ -15,6 +18,7 @@ entity c2sb_demo is
     port (
         -- ***** Clocks
         clk_50MHz     : in std_logic;
+        clk_27MHz     : in std_logic;
 
         -- ***** Flash 4MB
         flash_addr    : out std_logic_vector(21 downto 0);
@@ -62,9 +66,14 @@ architecture minimal of c2sb_demo is
 
 
 --##############################################################################
---
+-- Parameters
 
+-- Address size (FIXME: not tested with other values)
 constant SRAM_ADDR_SIZE : integer := 32;
+
+-- Clock rate selection (affects UART configuration)
+-- Acceptable values: {27000000, 50000000, 45000000(pll config)}
+constant CLOCK_FREQ : integer := 50000000;
 
 --##############################################################################
 -- RS232 interface signals
@@ -90,7 +99,7 @@ signal sd_do_reg :          std_logic;
 
 
 -- CPU access to hex display
-signal reg_display :        std_logic_vector(15 downto 0);
+signal reg_display :        std_logic_vector(31 downto 0);
 
 
 
@@ -98,7 +107,12 @@ signal reg_display :        std_logic_vector(15 downto 0);
 -- DE-1 board interface signals
 
 -- Synchronization FF chain for asynchronous reset input
-signal reset_sync :         std_logic_vector(2 downto 0);
+signal reset_sync :         std_logic_vector(3 downto 0);
+
+-- Reset pushbutton debouncing logic
+subtype t_debouncer is integer range 0 to CLOCK_FREQ;
+constant DEBOUNCING_DELAY : t_debouncer := 500;
+signal debouncing_counter : t_debouncer := (CLOCK_FREQ/1000) * DEBOUNCING_DELAY;
 
 -- Quad 7-segment display (non multiplexed) & LEDS
 signal display_data :       std_logic_vector(15 downto 0);
@@ -109,7 +123,24 @@ signal clk_1hz :            std_logic;
 signal clk_master :         std_logic;
 signal counter_1hz :        std_logic_vector(25 downto 0);
 signal reset :              std_logic;
+-- Master clock signal
 signal clk :                std_logic;
+-- Clock from PLL, is a PLL is used
+signal clk_pll :            std_logic;
+-- '1' when PLL is locked or when no PLL is used
+signal pll_locked :         std_logic;
+
+-- Altera PLL component declaration (in case it's used)
+-- Note that the MegaWizard component needs to be called 'pll' or the component
+-- name should be changed in this file.
+--component pll
+--    port (
+--        areset      : in std_logic  := '0';
+--        inclk0      : in std_logic  := '0';
+--        c0          : out std_logic ;
+--        locked      : out std_logic
+--    );
+--end component;
 
 -- SD control signals
 signal sd_in :              std_logic;
@@ -167,6 +198,7 @@ begin
 
     mpu: entity work.mips_mpu
     generic map (
+        CLOCK_FREQ     => CLOCK_FREQ,
         SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
     )
     port map (
@@ -204,7 +236,8 @@ process(clk)
 begin
     if clk'event and clk='1' then
         if io_byte_we/="0000" and io_wr_addr(15 downto 12)=X"2" then
-            reg_display <= io_wr_data(15 downto 0);
+            reg_display(15 downto 0) <= io_wr_data(15 downto 0);
+            --reg_display <= mpu_sram_address;
         end if;
     end if;
 end process hex_display_register;    
@@ -303,28 +336,45 @@ mpu_sram_data_rd <=
 -- Use button 3 as reset
 -- This FF chain only prevents metastability trouble, it does not help with
 -- switching bounces.
+-- (NOTE: the anti-metastability logic is probably not needed when we include 
+-- the debouncing logic)
 reset_synchronization:
 process(clk)
 begin
     if clk'event and clk='1' then
-        reset_sync(2) <= not buttons(3);
+        reset_sync(3) <= not buttons(2);
+        reset_sync(2) <= reset_sync(3);
         reset_sync(1) <= reset_sync(2);
         reset_sync(0) <= reset_sync(1);
     end if;
 end process reset_synchronization;
 
-reset <= reset_sync(0);
+reset_debouncing:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset_sync(0)='1' and reset_sync(1)='0' then
+            debouncing_counter <= (CLOCK_FREQ/1000) * DEBOUNCING_DELAY;
+        else
+            if debouncing_counter /= 0 then
+                debouncing_counter <= debouncing_counter - 1;
+            end if;
+        end if;
+    end if;
+end process reset_debouncing;
 
+--
+reset <= '1' when debouncing_counter /= 0 or pll_locked='0' else '0';
 
 -- Generate a 1-Hz 'clock' to flash a LED for visual reference.
-process(clk_50MHz)
+process(clk)
 begin
-  if clk_50MHz'event and clk_50MHz='1' then
+  if clk'event and clk='1' then
     if reset = '1' then
       clk_1hz <= '0';
       counter_1hz <= (others => '0');
     else
-      if conv_integer(counter_1hz) = 50000000 then
+      if conv_integer(counter_1hz) = CLOCK_FREQ-1 then
         counter_1hz <= (others => '0');
         clk_1hz <= not clk_1hz;
       else
@@ -334,8 +384,34 @@ begin
   end if;
 end process;
 
--- Master clock is external 50MHz oscillator
+-- Master clock is external 50MHz or 27MHz oscillator
+
+slow_clock:
+if CLOCK_FREQ = 27000000 generate
+clk <= clk_27MHz;
+pll_locked <=  '1';
+end generate;
+
+fast_clock:
+if CLOCK_FREQ = 50000000 generate
 clk <= clk_50MHz;
+pll_locked <=  '1';
+end generate;
+
+--pll_clock:
+--if CLOCK_FREQ /= 27000000 and CLOCK_FREQ/=50000000 generate
+---- Assume PLL black box is properly configured for whatever the clock rate is...
+--input_clock_pll: component pll
+--    port map(
+--        areset  => '0',
+--        inclk0  => clk_50MHz,
+--        c0      => clk_pll,
+--        locked  => pll_locked
+--    );
+--
+----clk <= clk_1hz when reg_display(31 downto 27)="10110" else clk_pll;
+--clk <= clk_pll;
+--end generate;
 
 
 --##############################################################################
@@ -351,7 +427,9 @@ green_leds <= reg_gleds;
 --##############################################################################
 
 -- Show contents of debug register in hex display
-display_data <= reg_display;
+display_data <= 
+    reg_display(15 downto 0);-- when switches(0)='0' else 
+    --reg_display(31 downto 16);
 
 
 -- 7-segment encoders; the dev board displays are not multiplexed or encoded
@@ -378,3 +456,22 @@ sd_in       <= sd_data;
 --  Embedded in the MPU entity
 
 end minimal;
+
+--------------------------------------------------------------------------------
+-- NOTE: Optional use of a PLL
+-- 
+-- In order to try the core with any clock other the 50 and 27MHz oscillators 
+-- readily available onboard we need to use a PLL.
+-- Unfortunately, Quartus-II won't let you just instantiate a PLL like ISE does.
+-- Instead, you have to build a PLL module using the MegaWizard tool.
+-- A nasty consequence of this is that the PLL can't be reconfigured without
+-- rebuilding it with the MW tool, and a bunch of ugly binary files have to be 
+-- committed to SVN if the project is to be complete.
+-- When I figure up what files need to be committed to SVN I will. Meanwhile you
+-- have to build the module yourself if you want to u se a PLL -- Sorry!
+-- At least it is very straightforward -- create an ALTPLL variation (from the 
+-- IO module library) named 'pll' with a 45MHz clock at output c0, that's it.
+--
+-- Please note that the system will run at >50MHz when using 'balanced' 
+-- synthesis. Only the 'area optimized' synthesis may give you trouble.
+--------------------------------------------------------------------------------
