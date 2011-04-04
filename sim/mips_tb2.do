@@ -9,6 +9,7 @@ vcom -reportprogress 300 -work work ../vhdl/mips_alu.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_mult.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_cpu.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_cache_stub.vhdl
+vcom -reportprogress 300 -work work ../vhdl/mips_cache.vhdl
 
 vcom -reportprogress 300 -work work ../vhdl/tb/txt_util.vhdl
 vcom -reportprogress 300 -work work ../vhdl/tb/mips_tb_pkg.vhdl
