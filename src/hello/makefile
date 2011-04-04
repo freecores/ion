@@ -3,7 +3,7 @@
 include ../common/makefile
 	
 # We'll run the simulation for 2000 clock cycles
-SIM_LENGTH = 20000
+SIM_LENGTH = 90000
 	
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
