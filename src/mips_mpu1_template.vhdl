@@ -17,6 +17,7 @@ use work.mips_pkg.all;
 
 entity mips_mpu is
     generic (
+        CLOCK_FREQ     : integer := 50000000;
         SRAM_ADDR_SIZE : integer := 17
     );
     port(
@@ -203,6 +204,9 @@ end process fpga_ram_block;
 --------------------------------------------------------------------------------
 
 serial_rx : entity work.rs232_rx 
+    generic map (
+        CLOCK_FREQ => CLOCK_FREQ
+    )
     port map(
         rxd =>      uart_rxd,
         data_rx =>  uart_data_rx,
@@ -235,6 +239,9 @@ uart_write <= '1'
     else '0';
 
 serial_tx : entity work.rs232_tx 
+    generic map (
+        CLOCK_FREQ => CLOCK_FREQ
+    )
     port map(
         clk =>      clk,
         reset =>    reset,
