@@ -58,6 +58,7 @@ type t_log_info is record
     prev_count_reg :        std_logic_vector(5 downto 0);
     
     data_rd_vma :           std_logic;
+    p1_rbank_we :           std_logic;
     code_rd_vma :           std_logic;
     data_byte_we :          std_logic_vector(3 downto 0);
 
@@ -77,11 +78,15 @@ type t_log_info is record
     mdiv_address :          t_word;
     mdiv_pending :          boolean;
     
+    exception :             std_logic;
+    exception_pc :          t_word;
+    
     data_rd_address :       t_word;
     load :                  std_logic;
     
     read_pending :          boolean;
     write_pending :         boolean;
+    debug :                 t_word;
     
     -- Log trigger --------------------------------------------------
     -- Enable logging after fetching from a given address -----------
@@ -127,26 +132,10 @@ begin
     -- about to log
     full_pc := info.pc_m(k);
     
+    -- Log memory writes ----------------------------------------
+    if info.write_pending then
+        if conv_integer(info.pending_data_wr_pc) <= conv_integer(full_pc) then
     
-    -- Log activity only at the 1st cycle of each instruction
-    if info.code_rd_vma='1' then
-        
-        -- Log register changes -------------------------------------
-        ri := X"00";
-        for i in 0 to 31 loop
-            if info.prev_rbank(i)/=info.rbank(i) 
-               and info.prev_rbank(i)(0)/='U' then
-                if info.log_triggered then
-                    print(l_file, "("& hstr(full_pc)& ") "& 
-                        "["& hstr(ri)& "]="& hstr(info.rbank(i)));
-                end if;
-            end if;
-            ri := ri + 1;
-        end loop;        
-
-        -- Log memory writes ----------------------------------------
-        if info.write_pending then
-
             ri := X"0" & info.pending_data_wr_we;
             temp := info.pending_data_wr;
             if info.pending_data_wr_we(3)='0' then
@@ -167,20 +156,29 @@ begin
                     hstr(ri)& "|="& 
                     hstr(temp)& " WR" );
             end if;
+            info.debug <= info.pending_data_wr_pc;
             info.write_pending <= false;
-        end if;   
+        end if;
+    end if;
 
-
-        -- Log memory reads ------------------------------------------
-        if info.read_pending and info.load='1' then
-            if info.log_triggered then
-                print(l_file, "("& hstr(info.pc_m(1)) &") ["& 
-                      hstr(info.pending_data_rd_addr) &"] <"& 
-                      "**"& ">="& 
-                      hstr(info.word_loaded)& " RD" ); -- FIXME
+    -- Log register bank activity.
+    -- NOTE: in previous versions we used to do this only at the 1st cycle of
+    --- instructions, mistakenly. Reg changes need to be logged as soon as 
+    -- they happen.
+    if true then --info.code_rd_vma='1' then
+        
+        -- Log register changes -------------------------------------
+        ri := X"00";
+        for i in 0 to 31 loop
+            if info.prev_rbank(i)/=info.rbank(i) 
+               and info.prev_rbank(i)(0)/='U' then
+                if info.log_triggered then
+                    print(l_file, "("& hstr(info.pc_m(k-0))& ") "& 
+                        "["& hstr(ri)& "]="& hstr(info.rbank(i)));
+                end if;
             end if;
-            info.read_pending <= false;
-        end if;    
+            ri := ri + 1;
+        end loop;        
                            
         -- Log aux register changes ---------------------------------
         if info.prev_lo /= info.reg_lo and info.prev_lo(0)/='U' then
@@ -189,7 +187,7 @@ begin
                 temp2 := info.mdiv_address;
                 info.mdiv_pending <= false;
             else
-                temp2 := info.pc_m(k-1);
+                temp2 := info.pc_m(k-2);
             end if;
         
             -- we're observing the value of reg_lo, but the mult core
@@ -214,7 +212,7 @@ begin
                 temp2 := info.mdiv_address;
                 info.mdiv_pending <= false;
             else
-                temp2 := info.pc_m(k-1);
+                temp2 := info.pc_m(k-2);
             end if;
             
             if info.log_triggered then
@@ -225,22 +223,48 @@ begin
         if info.prev_epc /= info.cp0_epc and info.cp0_epc(31)/='U'  then
             temp := info.cp0_epc & "00";
             if info.log_triggered then
-                print(l_file, "("& hstr(info.pc_m(k-1))& ") [EP]="& hstr(temp));
+                -- The instruction that caused the EP change is the last 
+                -- recorded trap/syscall exception.
+                print(l_file, "("& hstr(info.exception_pc)& ") [EP]="& hstr(temp));
             end if;
             info.prev_epc <= info.cp0_epc;
         end if;
 
-                       
+
         -- Save present cycle info to compare the next cycle --------
         info.prev_rbank <= info.rbank;
         info.prev_hi <= info.reg_hi;
         info.prev_lo <= info.reg_lo;
         
+        --info.pc_m(3) <= info.pc_m(2);
+        --info.pc_m(2) <= info.pc_m(1);
+        --info.pc_m(1) <= info.pc_m(0);
+        --info.pc_m(0) <= info.present_code_rd_addr & "00";
+        
+    end if;
+    
+    -- Update instruction address table only at the 1st cycle of each 
+    -- instruction.
+    if info.code_rd_vma='1' then
         info.pc_m(3) <= info.pc_m(2);
         info.pc_m(2) <= info.pc_m(1);
         info.pc_m(1) <= info.pc_m(0);
         info.pc_m(0) <= info.present_code_rd_addr & "00";
-        
+    end if;
+
+    -- Log memory reads ------------------------------------------
+    if info.read_pending and info.load='1' and info.p1_rbank_we='1' then
+        if info.log_triggered then
+            print(l_file, "("& hstr(info.pc_m(1)) &") ["& 
+                  hstr(info.pending_data_rd_addr) &"] <"& 
+                  "**"& ">="& 
+                  hstr(info.word_loaded)& " RD" );
+        end if;
+        info.read_pending <= false;
+    end if;
+
+    if info.exception='1' then
+        info.exception_pc <= info.pc_m(1);
     end if;
 
     if info.data_byte_we/="0000" then
@@ -283,6 +307,7 @@ begin
     init_signal_spy("/"&entity_name&"/mult_div/count_reg", signal_name&".mdiv_count_reg", 0, -1);
     init_signal_spy("/"&entity_name&"/cp0_epc", signal_name&".cp0_epc", 0, -1);
     init_signal_spy("/"&entity_name&"/data_rd_vma", signal_name&".data_rd_vma", 0, -1);
+    init_signal_spy("/"&entity_name&"/p1_rbank_we", signal_name&".p1_rbank_we", 0, -1);
     init_signal_spy("/"&entity_name&"/code_rd_vma", signal_name&".code_rd_vma", 0, -1);
     init_signal_spy("/"&entity_name&"/p2_do_load", signal_name&".load", 0, -1);
     init_signal_spy("/"&entity_name&"/data_addr", signal_name&".present_data_wr_addr", 0, -1);
@@ -290,6 +315,7 @@ begin
     init_signal_spy("/"&entity_name&"/byte_we", signal_name&".data_byte_we", 0, -1);
     init_signal_spy("/"&entity_name&"/p2_data_word_rd", signal_name&".word_loaded", 0, -1);
     init_signal_spy("/"&entity_name&"/data_addr", signal_name&".present_data_rd_addr", 0, -1);
+    init_signal_spy("/"&entity_name&"/p1_exception", signal_name&".exception", 0, -1);
 
     while done='0' loop
         wait until clk'event and clk='1';
@@ -302,6 +328,7 @@ begin
             -- setting log_trigger_address to a suitable value.
             info.log_trigger_address <= trigger_addr;
             info.log_triggered <= false;
+            info.debug <= (others => '0');
         else
             log_cpu_status(info, l_file);
         end if;
