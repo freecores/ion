@@ -17,6 +17,7 @@ use work.mips_pkg.all;
 
 entity mips_mpu is
     generic (
+        CLOCK_FREQ     : integer := 50000000;
         SRAM_ADDR_SIZE : integer := 17
     );
     port(
@@ -57,6 +58,9 @@ signal cpu_code_rd_vma :    std_logic;
 signal cpu_data_wr :        t_word;
 signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
+signal cpu_ic_invalidate :  std_logic;
+signal cpu_cache_enable :   std_logic;
+
 
 -- interface to i/o
 signal mpu_io_rd_data :     std_logic_vector(31 downto 0);
@@ -176,9 +180,9 @@ signal bram :               t_bram := (
     X"00463821",X"10640006",X"00000000",X"10680004",
     X"00000000",X"A0E30000",X"0BF00143",X"24C60001",
     X"00463021",X"03E00008",X"A0C00000",X"636F6D70",
-    X"696C6520",X"74696D65",X"3A204D61",X"72202032",
-    X"20323031",X"31202D2D",X"2030383A",X"35353A34",
-    X"360A0000",X"67636320",X"76657273",X"696F6E3A",
+    X"696C6520",X"74696D65",X"3A204170",X"72202034",
+    X"20323031",X"31202D2D",X"2031333A",X"35313A32",
+    X"390A0000",X"67636320",X"76657273",X"696F6E3A",
     X"2020342E",X"342E310A",X"00000000",X"0A0A4865",
     X"6C6C6F20",X"576F726C",X"64210A0A",X"0A000000",
     X"00000000",X"00000000",X"00000000",X"00000000",
@@ -632,12 +636,14 @@ cpu: entity work.mips_cpu
         byte_we     => cpu_byte_we,
     
         mem_wait    => cpu_mem_wait,
+        cache_enable=> cpu_cache_enable,
+        ic_invalidate=>cpu_ic_invalidate,
         
         clk         => clk,
         reset       => reset
     );
 
-cache: entity work.mips_cache_stub
+cache: entity work.mips_cache
     generic map (
         BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
         SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
@@ -659,7 +665,8 @@ cache: entity work.mips_cache_stub
         data_wr         => cpu_data_wr,
                         
         mem_wait        => cpu_mem_wait,
-        cache_enable    => '1',
+        cache_enable    => cpu_cache_enable,
+        ic_invalidate   => cpu_ic_invalidate,
         
         -- interface to FPGA i/o devices
         io_rd_data      => mpu_io_rd_data,
@@ -710,6 +717,9 @@ end process fpga_ram_block;
 --------------------------------------------------------------------------------
 
 serial_rx : entity work.rs232_rx 
+    generic map (
+        CLOCK_FREQ => CLOCK_FREQ
+    )
     port map(
         rxd =>      uart_rxd,
         data_rx =>  uart_data_rx,
@@ -742,6 +752,9 @@ uart_write <= '1'
     else '0';
 
 serial_tx : entity work.rs232_tx 
+    generic map (
+        CLOCK_FREQ => CLOCK_FREQ
+    )
     port map(
         clk =>      clk,
         reset =>    reset,
