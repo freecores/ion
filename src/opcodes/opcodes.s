@@ -109,7 +109,7 @@ trap_return_delay_slot:
 
 
 StartTest:
-    mtc0    $0,$12              # disable interrupts
+    mtc0    $0,$12              # disable interrupts, disable cache
     lui     $20,0x2000          # serial port write address
     ori     $21,$0,'\n'         # <CR> character
     ori     $22,$0,'X'          # 'X' letter

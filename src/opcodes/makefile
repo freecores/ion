@@ -3,7 +3,7 @@
 include ../common/makefile
 
 # We'll run the simulation for long enough for the program to finish
-SIM_LENGTH = 10000
+SIM_LENGTH = 70000
 	
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
