@@ -4,10 +4,9 @@
 -- project:       ION (http://www.opencores.org/project,ion_cpu)
 -- author:        Jose A. Ruiz (ja_rd@hotmail.com)
 -- created:       Jan/11/2011
--- last modified: Mar/26/2011 (ja_rd@hotmail.com)
+-- last modified: Apr/13/2011 (ja_rd@hotmail.com)
 --------------------------------------------------------------------------------
--- Software placed into the public domain by the author. Use under the terms of
--- the GPL.
+-- Use under the terms of the GPL.
 -- Software 'as is' without warranty.  Author liable for nothing.
 --
 --------------------------------------------------------------------------------
@@ -28,7 +27,7 @@
 -- 1.- Load interlocks: the pipeline is stalled for every load instruction, even
 --     if the target register is not used in the following instruction. So that
 --     every load takes two cycles.
---     The interlock logic should check register indices.
+--     The interlock logic should check register indices (@note2)
 --
 --------------------------------------------------------------------------------
 
@@ -245,11 +244,6 @@ p2_data_word_ext <= '0'          when p2_ld_unsigned='1' else
                     data_rd(23)  when p2_rd_addr="01" else
                     data_rd(31);
 
---                    data_rd(15)  when p2_ld_upper_byte='1' else
---                    data_rd(7)   when p2_rd_addr="11" else
---                    data_rd(15)  when p2_rd_addr="10" else
---                    data_rd(23);
-
 -- byte 0 may come from any of the 4 bytes of the input word
 with p2_rd_mux_control select p2_data_word_rd(7 downto 0) <=
     data_rd(31 downto 24)        when "0000",
@@ -273,6 +267,9 @@ with p2_ld_upper_hword select p2_data_word_rd(31 downto 16) <=
     (others => p2_data_word_ext) when '0',
     data_rd(31 downto 16)        when others;
 
+--------------------------------------------------------------------------------
+-- Reg bank input multiplexor
+
 -- Select which data is to be written back to the reg bank and where
 p1_rbank_wr_addr <= p1_rd_num   when p2_do_load='0' and p1_link='0' else
                     "11111"     when p2_do_load='0' and p1_link='1' else 
@@ -289,6 +286,9 @@ with (p2_wback_mux_sel) select p1_rbank_wr_data <=
     p2_data_word_rd            when "01",
     p0_pc_incremented & "00"   when "11",
     cp0_reg_read               when others;
+
+--------------------------------------------------------------------------------
+-- Register bank RAM & Rbank WE logic
 
 p1_rbank_we <= '1' when (p2_do_load='1' or p1_load_alu='1' or 
                         p1_link='1' or p1_get_cp0='1') and 
@@ -323,7 +323,10 @@ begin
     end if;
 end process synchronous_reg_bank;
 
--- Register writeback data in case it needs to be forwarded.
+--------------------------------------------------------------------------------
+-- Reg bank 'writeback' data forwarding
+
+-- Register writeback data in a DFF in case it needs to be forwarded.
 data_forward_register:
 process(clk)
 begin
@@ -343,13 +346,6 @@ p0_rbank_rt_hazard <= '1' when p1_rbank_wr_addr=p0_rt_num and p1_rbank_we='1'
 
 p1_rs <= p1_rs_rbank when p1_rbank_rs_hazard='0' else p1_rbank_forward;
 p1_rt <= p1_rt_rbank when p1_rbank_rt_hazard='0' else p1_rbank_forward;
-
--- Zero extension/Sign extension for instruction immediate data
-p1_data_imm(15 downto 0)  <= p1_ir_reg(15 downto 0);
-
-with p1_do_zero_ext_imm select p1_data_imm(31 downto 16) <= 
-    (others => '0')             when '1',
-    (others => p1_ir_reg(15))   when others;
 
 
 --------------------------------------------------------------------------------
@@ -481,9 +477,9 @@ end process pc_register;
 -- Common rd/wr address; lowest 2 bits are output as debugging aid only
 data_addr <= p1_data_addr(31 downto 0);
 
--- FIXME these two need to pushed behind a register, they are glitch-prone
-data_rd_vma <= p1_do_load and not pipeline_stalled; -- FIXME register
-code_rd_vma <= (not stall_pipeline) and reset_done; -- FIXME register
+-- 'Memory enable' signals for both memory interfaces
+data_rd_vma <= p1_do_load and not pipeline_stalled;
+code_rd_vma <= (not stall_pipeline) and reset_done;
 
 -- reset_done will be asserted after the reset process is finished, when the
 -- CPU can start operating normally.
@@ -500,7 +496,7 @@ begin
     end if;
 end process wait_for_end_of_reset;
 
-
+-- The final value used to access code memory
 code_rd_addr <= p0_pc_next;
 
 -- compute target of J/JR instructions
@@ -535,13 +531,21 @@ begin
     end if;
 end process instruction_register;
 
+-- Zero extension/Sign extension of instruction immediate data
+p1_data_imm(15 downto 0)  <= p1_ir_reg(15 downto 0);
+
+with p1_do_zero_ext_imm select p1_data_imm(31 downto 16) <= 
+    (others => '0')             when '1',
+    (others => p1_ir_reg(15))   when others;
+
+
 -- 'Extract' main fields from IR, for convenience
 p1_ir_op <= p1_ir_reg(31 downto 26);
 p1_ir_fn <= p1_ir_reg(5 downto 0);
 
 -- Decode jump type, if any, for instructions with op/=0
 with p1_ir_op select p1_jump_type_set0 <=
-    -- FIXME weed out invalid instructions
+    -- FIXME verify that we actually weed out ALL invalid instructions
     "10" when "000001", -- BLTZ, BGEZ, BLTZAL, BGTZAL
     "11" when "000010", -- J
     "11" when "000011", -- JAL
@@ -596,10 +600,8 @@ p1_exception <= '1' when
 p1_set_cp0 <= '1' when p1_ir_reg(31 downto 21)="01000000100" else '0';
 p1_get_cp0 <= '1' when p1_ir_reg(31 downto 21)="01000000000" else '0';
 
--- FIXME elaborate and explain this
-
-p1_op_special <= '1' when p1_ir_op="000000" else '0';
-
+-- Raise some signals for some particular group of opcodes
+p1_op_special <= '1' when p1_ir_op="000000" else '0'; -- group '0' opcodes
 p1_do_reg_jump <= '1' when p1_op_special='1' and p1_ir_fn(5 downto 1)="00100" else '0';
 p1_do_zero_ext_imm <= '1' when (p1_ir_op(31 downto 28)="0011") else '0';
 
@@ -671,7 +673,7 @@ p1_store_size <= p1_ir_op(27 downto 26);
 -- Extract source and destination C0 register indices
 p1_c0_rs_num <= p1_ir_reg(15 downto 11);
 
--- Decode ALU control dignals
+-- Decode ALU control signals
 
 p1_ac.use_slt <= '1' when (p1_ir_op="000001" and p1_ir_reg(20 downto 17)="01000") or
                         (p1_ir_op="000000" and p1_ir_reg(5 downto 1)="10101") or
@@ -765,7 +767,8 @@ p1_unknown_opcode <= '1' when
 
     else '0';
 
---------------------------------------------------------------------------------
+--##############################################################################
+-- Pipeline registers & pipeline control logic
 
 -- Stage 1 pipeline register. Involved in ALU control.
 pipeline_stage1_register:
@@ -853,13 +856,10 @@ begin
 end process pipeline_stage2_register_others;
 
 --------------------------------------------------------------------------------
+-- Pipeline control logic (stall control)
 
--- FIXME stall when needed: mem pause, mdiv pause and load interlock
-
-
--- FIXME make sure this combinational will not have bad glitches
+-- FIXME demonstrate that this combinational will not have bad glitches
 stall_pipeline <= mem_wait or load_interlock or p1_muldiv_stall;
-
 
 -- FIXME load interlock should happen only if the instruction following 
 -- the load actually uses the load target register. Something like this:
@@ -869,8 +869,6 @@ load_interlock <= '1' when
     pipeline_stalled='0' and -- not already stalled (i.e. assert for 1 cycle)
     (p1_rs1_hazard='1' or p1_rs2_hazard='1')
     else '0';
-
-
 
 
 pipeline_stalled <= stalled_interlock or stalled_memwait or stalled_muldiv;
@@ -910,6 +908,8 @@ begin
     end if;
 end process pipeline_stall_registers;
 
+-- Here's where we stall the pipeline upon load reg bank hazards
+-- FIXME (@note2) for the time being we stall the pipeline for ALL loads
 p1_rs1_hazard <= '1'; --'1' when p0_uses_rs1='1' and p1_rd_num=p0_rs_num else '0';
 p1_rs2_hazard <= '1'; --'1' when p0_uses_rs2='1' and p1_rd_num=p0_rt_num else '0';
 
@@ -935,7 +935,11 @@ with p1_ir_op select p0_uses_rs2 <=
     '0' when others;
     
 
+--##############################################################################
+-- Data memory interface
+
 --------------------------------------------------------------------------------
+-- Memory addressing adder (data address generation)
 
 p1_data_offset(31 downto 16) <= (others => p1_data_imm(15));
 p1_data_offset(15 downto 0) <= p1_data_imm(15 downto 0);
@@ -943,6 +947,7 @@ p1_data_offset(15 downto 0) <= p1_data_imm(15 downto 0);
 p1_data_addr <= p1_rs + p1_data_offset;
 
 --------------------------------------------------------------------------------
+-- Write enable vector
 
 -- byte_we is a function of the write size and alignment
 -- size = {00=1,01=2,11=4}; we 3 is MSB, 0 is LSB; big endian => 00 is msb
@@ -1051,4 +1056,8 @@ end architecture rtl;
 -- The register bank WE is enabled when the pipeline is not stalled and when 
 -- it is stalled because of a load interlock; so that in case of interlock the
 -- load operation can complete while the rest of the pipeline is frozen.
+--
+-- @note2:
+-- The logic that checks register indices for data hazards is 'commented out'
+-- because it has not been tested yet.
 --------------------------------------------------------------------------------
