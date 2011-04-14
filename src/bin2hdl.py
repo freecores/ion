@@ -1,6 +1,7 @@
-""" xcxcxc
-
-
+""" 
+Builds VHDL file from a template by replacing tags with parameter values.
+See the makefiles of the code samples included in project ION for usage 
+examples.
 """
 import sys
 import getopt
