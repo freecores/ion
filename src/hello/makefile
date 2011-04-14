@@ -30,11 +30,19 @@ hello: hello.c
 	$(COPY_MIPS) -I elf32-big -j.data -j.bss -O binary hello.axf hello.data
 	
 
+
 # Create VHDL file for simulation test bench using TB2 template
 hello_sim: hello
 	$(TO_VHDL) --code hello.code --data hello.data \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
+		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
+
+# Create VHDL file for simulation test bench using TB0 template
+hello_sim_bram: hello
+	$(TO_VHDL) --code hello.code --data hello.data \
+		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
+		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb0_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
 
 
