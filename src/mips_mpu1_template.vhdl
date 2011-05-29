@@ -130,7 +130,7 @@ cpu: entity work.mips_cpu
         reset       => reset
     );
 
-cache: entity work.mips_cache_stub
+cache: entity work.mips_cache
     generic map (
         BRAM_ADDR_SIZE => BRAM_ADDR_SIZE,
         SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
