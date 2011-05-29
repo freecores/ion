@@ -32,7 +32,7 @@ LINUX_PWD =
 
 # MIPS GCC cross-toolchain: CodeSourcery -- replace with your own
 
-BIN_MIPS = C:/desarrollo/SourceryGpp/bin
+BIN_MIPS = C:/dev/embedded/SourceryGpp/mips-elf-11-03.52/bin
 GCC_MIPS  = $(BIN_MIPS)/mips-sde-elf-gcc.exe $(CFLAGS)
 AS_MIPS   = $(BIN_MIPS)/mips-sde-elf-as
 LD_MIPS   = $(BIN_MIPS)/mips-sde-elf-ld
