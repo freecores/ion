@@ -175,6 +175,7 @@ signal p2_rd_addr :         std_logic_vector(1 downto 0);
 signal p2_rd_mux_control :  std_logic_vector(3 downto 0);
 signal p2_load_target :     t_regnum;
 signal p2_do_load :         std_logic;
+signal p2_do_store :        std_logic;
 signal p2_ld_upper_hword :  std_logic;
 signal p2_ld_upper_byte :   std_logic;
 signal p2_ld_unsigned :     std_logic;
@@ -814,6 +815,7 @@ begin
         -- Clear load control, effectively preventing load, at reset or if
         -- the previous instruction raised an exception.
         if reset='1' or p2_exception='1' then
+            p2_do_store <= '0';
             p2_do_load <= '0';
             p2_ld_upper_hword <= '0';
             p2_ld_upper_byte <= '0';
@@ -830,6 +832,7 @@ begin
             else
                 p2_do_load <= '0';
             end if;
+            p2_do_store <= p1_do_store;
             p2_load_target <= p1_rd_num;
             p2_ld_upper_hword <= p1_ld_upper_hword;
             p2_ld_upper_byte <= p1_ld_upper_byte;
@@ -951,7 +954,20 @@ p1_data_addr <= p1_rs + p1_data_offset;
 
 -- byte_we is a function of the write size and alignment
 -- size = {00=1,01=2,11=4}; we 3 is MSB, 0 is LSB; big endian => 00 is msb
-p1_we_control <= pipeline_stalled & p1_do_store & p1_store_size & p1_data_addr(1 downto 0);
+
+p1_we_control <= (p2_do_store xor pipeline_stalled) & p1_do_store & p1_store_size & p1_data_addr(1 downto 0);
+--p1_we_control <= (pipeline_stalled) & p1_do_store & p1_store_size & p1_data_addr(1 downto 0);
+
+-- Bug: For two SW instructions in a row, the 2nd one will be stalled and lost: 
+-- the write will never be executed by the cache.
+-- Fix: replaced 'pipeline_stalled' from the equation above by '0' literal.
+-- FIXME the above fix has been tested with the code samples BUT it may still
+-- have unintended consequences (I forgot why 'pipeline_stalled' was there in
+-- the first place...)
+-- The present code will not work in cache-less systems (such as the tb0) if 
+-- it stalls the CPU. Solution: don't allow stalls in cache-less systems.
+-- FIXME this little mess has to be documented.
+
 
 with p1_we_control select byte_we <=
     "1000"  when "010000",    -- SB %0
