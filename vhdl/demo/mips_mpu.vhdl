@@ -42,7 +42,10 @@ entity mips_mpu is
 
         -- UART 
         uart_rxd        : in std_logic;
-        uart_txd        : out std_logic
+        uart_txd        : out std_logic;
+        
+        -- Debug info
+        debug_info      : out t_debug_info
     );
 end; --entity mips_mpu
 
@@ -60,6 +63,7 @@ signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
 signal cpu_ic_invalidate :  std_logic;
 signal cpu_cache_enable :   std_logic;
+signal unmapped_access :    std_logic;
 
 
 -- interface to i/o
@@ -179,9 +183,9 @@ signal bram :               t_bram := (
     X"00031E02",X"2C67000E",X"10E00003",X"00644804",
     X"05200004",X"00000000",X"A1030000",X"0BF00141",
     X"24C60001",X"00463021",X"03E00008",X"A0C00000",
-    X"636F6D70",X"696C6520",X"74696D65",X"3A204D61",
-    X"79203239",X"20323031",X"31202D2D",X"2031373A",
-    X"30383A33",X"390A0000",X"67636320",X"76657273",
+    X"636F6D70",X"696C6520",X"74696D65",X"3A204A75",
+    X"6E202031",X"20323031",X"31202D2D",X"2031353A",
+    X"30343A32",X"330A0000",X"67636320",X"76657273",
     X"696F6E3A",X"2020342E",X"352E320A",X"00000000",
     X"0A0A4865",X"6C6C6F20",X"576F726C",X"64210A0A",
     X"0A000000",X"00000000",X"00000000",X"00000000",
@@ -667,6 +671,7 @@ cache: entity work.mips_cache
         mem_wait        => cpu_mem_wait,
         cache_enable    => cpu_cache_enable,
         ic_invalidate   => cpu_ic_invalidate,
+        unmapped        => unmapped_access,
         
         -- interface to FPGA i/o devices
         io_rd_data      => mpu_io_rd_data,
@@ -712,6 +717,28 @@ end process fpga_ram_block;
 
 
 --------------------------------------------------------------------------------
+-- Debug stuff
+
+-- Register some debug signals. These are meant to be connected to LEDs on a 
+-- dev board, or maybe to logic analyzer probes. They are not useful once
+-- the core is fully debugged.
+debug_info_register:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            debug_info.unmapped_access <= '0';
+        else
+            if unmapped_access='1' then
+                -- This flag will be asserted permanently after any kind of 
+                -- unmapped access (code, data read or data write).
+                debug_info.unmapped_access <= '1';
+            end if;
+        end if;
+        
+        debug_info.cache_enabled <= cpu_cache_enable;
+    end if;
+end process debug_info_register;
 
 
 --------------------------------------------------------------------------------
