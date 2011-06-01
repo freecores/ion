@@ -229,6 +229,7 @@ begin
         mem_wait        => cpu_mem_wait,
         cache_enable    => cpu_cache_enable,
         ic_invalidate   => cpu_ic_invalidate,
+        unmapped        => OPEN,
         
         -- interface to FPGA i/o devices
         io_rd_data      => io_rd_data,
