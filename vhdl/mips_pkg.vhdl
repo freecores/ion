@@ -96,6 +96,14 @@ type t_alu_flags is record
     inp1_eq_inp2 :      std_logic;
 end record t_alu_flags;
 
+-- Debug info output by sinthesizable MPU core; meant to debug the core itself, 
+-- not to debug software!
+type t_debug_info is record
+    cache_enabled :     std_logic;
+    unmapped_access :   std_logic;
+end record t_debug_info;
+
+
 -- 32-cycle mul/div module control. Bits 4-3 & 1-0 of IR.
 subtype t_mult_function is std_logic_vector(3 downto 0);
 constant MULT_NOTHING       : t_mult_function := "0000";

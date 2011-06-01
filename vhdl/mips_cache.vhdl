@@ -169,6 +169,8 @@ entity mips_cache is
         mem_wait        : out std_logic;
         cache_enable    : in std_logic;
         ic_invalidate   : in std_logic;
+        -- Asserted for 1 cycle after code/data access to unmapped area
+        unmapped        : out std_logic;
 
         -- interface to FPGA i/o devices
         io_rd_data      : in std_logic_vector(31 downto 0);
@@ -265,8 +267,7 @@ type t_cache_state is (
     data_ignore_read,           -- hook for raising error flag FIXME untested
 
     -- Other states -------------------------------------------------
-
-    --code_wait_for_dcache,       -- wait for D-cache to stop using the buses
+    
     bug                         -- caught an error in the state machine
    );
 
@@ -417,7 +418,7 @@ begin
             when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
             when MT_IO_SYNC     => ns <= data_write_io_0;
             -- FIXME ignore write to undecoded area (clear pending flag)
-            when others         => ns <= ps;
+            when others         => ns <= data_ignore_write;
             end case;
 
         elsif read_pending='1' then
@@ -455,7 +456,7 @@ begin
                 when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
                 when MT_IO_SYNC     => ns <= data_write_io_0;
                 -- FIXME ignore write to undecoded area (clear pending flag)
-                when others         => ns <= ps;
+                when others         => ns <= data_ignore_write;
                 end case;
     
             elsif read_pending='1' then
@@ -493,7 +494,7 @@ begin
                     when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
                     when MT_IO_SYNC     => ns <= data_write_io_0;
                     -- FIXME ignore write to undecoded area (clear pending flag)
-                    when others         => ns <= ps;
+                    when others         => ns <= data_ignore_write;
                     end case;
     
                 elsif read_pending='1' then
@@ -666,9 +667,11 @@ begin
         end if;
 
     when data_ignore_write =>
+        -- Access to unmapped area. We have 1 cycle to do something.
         ns <= idle;
 
     when data_ignore_read =>
+        -- Access to unmapped area. We have 1 cycle to do something.
         ns <= idle;
 
     -- Exception states (something went wrong) ----------------------
@@ -676,7 +679,6 @@ begin
     when code_crash =>
         -- Attempted to fetch from i/o area. This is a software bug, probably,
         -- and should trigger a trap. We have 1 cycle to do something about it.
-        -- FIXME do something about wrong fetch: trap, etc.
         -- After this cycle, back to normal.
         ns <= idle;
 
@@ -858,6 +860,12 @@ code_rd_attr <= decode_addr(code_rd_addr_mask);
 data_rd_attr <= decode_addr(data_rd_addr_mask);
 data_wr_attr <= decode_addr(data_wr_addr_mask);
 
+-- Unmapped area access flag, raised for 1 cycle only after each wrong access
+with ps select unmapped <=
+    '1' when code_crash,
+    '1' when data_ignore_read,
+    '1' when data_ignore_write,
+    '0' when others;
 
 --------------------------------------------------------------------------------
 -- BRAM interface (BRAM is FPGA Block RAM)
