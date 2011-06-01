@@ -11,6 +11,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned.all;
+use work.mips_pkg.all; -- Only needed if port debug_info is not OPEN
 
 -- FPGA i/o for Terasic DE-1 board
 -- (Many of the board's i/o devices will go unused in this demo)
@@ -167,6 +168,8 @@ signal mpu_sram_data_wr :   std_logic_vector(15 downto 0);
 signal mpu_sram_byte_we_n : std_logic_vector(1 downto 0);
 signal mpu_sram_oe_n :      std_logic;
 
+signal debug_info :         t_debug_info;
+
 -- Converts hex nibble to 7-segment
 -- Segments ordered as "GFEDCBA"; '0' is ON, '1' is OFF
 function nibble_to_7seg(nibble : std_logic_vector(3 downto 0))
@@ -222,6 +225,8 @@ begin
         uart_rxd    => rxd,
         uart_txd    => txd,
 
+        debug_info  => debug_info,
+        
         clk         => clk,
         reset       => reset
     );
@@ -270,8 +275,8 @@ io_rd_data(31 downto 22) <= switches;
 
 
 -- red leds (light with '1') -- some CPU control signals
-red_leds(0) <= '0';
-red_leds(1) <= '0';
+red_leds(0) <= debug_info.cache_enabled;
+red_leds(1) <= debug_info.unmapped_access;
 red_leds(2) <= '0';
 red_leds(3) <= '0';
 red_leds(4) <= '0';
