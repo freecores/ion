@@ -172,8 +172,9 @@ inv_i_cache_loop:
     blt     $a2,$a1,inv_i_cache_loop
     addi    $a2,1
     
+    li      $a1,0x00020000      # Leave with cache enabled
     jr      $ra
-    mtc0    $zero,$12           # Leave SR in reset state
+    mtc0    $a1,$12
 
 #---- Constant data (note we keep it in the text section) ----------------------
 
