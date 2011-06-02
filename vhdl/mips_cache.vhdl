@@ -1180,6 +1180,7 @@ with ps select data_wait <=
     '1' when data_refill_bram_0,
     '1' when data_refill_bram_1,
     '1' when data_read_io_0,
+    read_pending or write_pending when idle,
     '0' when others;
 
 end architecture direct;
