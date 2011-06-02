@@ -955,15 +955,14 @@ p1_data_addr <= p1_rs + p1_data_offset;
 -- byte_we is a function of the write size and alignment
 -- size = {00=1,01=2,11=4}; we 3 is MSB, 0 is LSB; big endian => 00 is msb
 
-p1_we_control <= (p2_do_store xor pipeline_stalled) & p1_do_store & p1_store_size & p1_data_addr(1 downto 0);
+p1_we_control <= (mem_wait) & p1_do_store & p1_store_size & p1_data_addr(1 downto 0);
 --p1_we_control <= (pipeline_stalled) & p1_do_store & p1_store_size & p1_data_addr(1 downto 0);
 
 -- Bug: For two SW instructions in a row, the 2nd one will be stalled and lost: 
 -- the write will never be executed by the cache.
--- Fix: replaced 'pipeline_stalled' from the equation above by '0' literal.
--- FIXME the above fix has been tested with the code samples BUT it may still
--- have unintended consequences (I forgot why 'pipeline_stalled' was there in
--- the first place...)
+-- Fixed by stalling immediately after asserting byte_we.
+-- FIXME the above fix has been tested but is still under trial (provisional)
+
 -- The present code will not work in cache-less systems (such as the tb0) if 
 -- it stalls the CPU. Solution: don't allow stalls in cache-less systems.
 -- FIXME this little mess has to be documented.
@@ -1014,9 +1013,10 @@ begin
         else
             -- no need to check for stall cycles when loading these
             if p1_set_cp0='1' then
+                -- NOTE: in MTCx, the source register is Rt
                 -- FIXME check for CP0 reg index
-                cp0_status <= p1_rs(cp0_status'high downto 0);
-                cp0_cache_control <= p1_rs(17 downto 16);
+                cp0_status <= p1_rt(cp0_status'high downto 0);
+                cp0_cache_control <= p1_rt(17 downto 16);
             end if;
             if p1_exception='1' and pipeline_stalled='0' then
                 cp0_epc <= p0_pc_restart;
