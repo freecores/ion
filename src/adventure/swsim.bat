@@ -2,5 +2,5 @@
 ..\..\tools\slite\slite\bin\Debug\slite.exe ^
     --bram=bootstrap.code ^
     --flash=adventure.bin ^
-    --trigger=ffffffff ^
+    --trigger=b0000000 ^
     --noprompt

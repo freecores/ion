@@ -5,7 +5,7 @@
 include ..\\common\\makefile
 	
 # We'll run the simulation for long enough to complete the test
-SIM_LENGTH = 20000000
+SIM_LENGTH = 400000000
 
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
@@ -57,7 +57,7 @@ bootstrap: bootstrap.s
 
 # Create VHDL file for simulation test bench using TB2 template
 adventure_sim: bootstrap adventure
-	$(TO_VHDL) --code bootstrap.code --log_trigger=b00097d8 \
+	$(TO_VHDL) --code bootstrap.code --log_trigger=b0000000 \
 		--flash adventure.bin --flash_size $(FLASH_SIM_SIZE) \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
