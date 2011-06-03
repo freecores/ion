@@ -172,6 +172,20 @@ inv_i_cache_loop:
     blt     $a2,$a1,inv_i_cache_loop
     addi    $a2,1
     
+    # Now, the D-Cache is different. To invalidate a D-Cache line you just 
+    # read from it (by proper selection of a dummy target address)  while bits 
+    # CP0[12].17:16=01. The data read is undefined and should be discarded.
+
+    li      $a0,0               # Use any base address that is mapped
+    li      $a2,0
+    li      $a1,DCACHE_NUM_LINES-1
+    
+inv_d_cache_loop:
+    lw      $zero,0($a0)
+    addi    $a0,DCACHE_LINE_SIZE*4
+    blt     $a2,$a1,inv_d_cache_loop
+    addi    $a2,1    
+    
     li      $a1,0x00020000      # Leave with cache enabled
     jr      $ra
     mtc0    $a1,$12
