@@ -34,6 +34,11 @@
     # WARNING: the assembler expands div instructions, see 'as' manual
     .set TEST_DIV, 1                    # DIV* instructions
     .set TEST_MUL, 1                    # MUL* instructions
+    .set USE_CACHE, 1                   # Initialize and enable cache
+    
+    .set ICACHE_NUM_LINES, 256              # no. of lines in the I-Cache
+    .set DCACHE_NUM_LINES, 256              # no. of lines in the D-Cache
+    .set DCACHE_LINE_SIZE, 4                # D-Cache line size in words
 
     #---------------------------------------------------------------------------
 
@@ -109,7 +114,12 @@ trap_return_delay_slot:
 
 
 StartTest:
+    .ifgt   USE_CACHE
+    jal     setup_cache
+    nop
+    .else
     mtc0    $0,$12              # disable interrupts, disable cache
+    .endif
     lui     $20,0x2000          # serial port write address
     ori     $21,$0,'\n'         # <CR> character
     ori     $22,$0,'X'          # 'X' letter
@@ -1393,13 +1403,48 @@ test_b10:
     ori     $v0,0x5503
 test_b11:
 
-    
-
- 
 $DONE:
     j       $DONE
     nop
- 
+
+# void setup_cache(void) -- invalidates all I- and D-Cache lines (uses no RAM)
+setup_cache:
+    lui     $a0,0x0001          # Enable I-cache line invalidation
+    mtc0    $a0,$12
+    
+    # In order to invalidate a I-Cache line we have to write its tag number to 
+    # any address while bits CP0[12].17:16=01. The write will be executed as a
+    # regular write too, as a side effect, so we need to choose a harmless 
+    # target address. The BSS will do -- it will be cleared later.
+    # We'll cover all ICACHE_NUM_LINES lines no matter what the starting 
+    # address is, anyway.
+    
+    la      $a0,__bss_start
+    li      $a2,0
+    li      $a1,ICACHE_NUM_LINES-1
+    
+inv_i_cache_loop:
+    sw      $a2,0($a0)
+    blt     $a2,$a1,inv_i_cache_loop
+    addi    $a2,1
+    
+    # Now, the D-Cache is different. To invalidate a D-Cache line you just 
+    # read from it (by proper selection of a dummy target address)  while bits 
+    # CP0[12].17:16=01. The data read is undefined and should be discarded.
+
+    li      $a0,0               # Use any base address that is mapped
+    li      $a2,0
+    li      $a1,DCACHE_NUM_LINES-1
+    
+inv_d_cache_loop:
+    lw      $zero,0($a0)
+    addi    $a0,DCACHE_LINE_SIZE*4
+    blt     $a2,$a1,inv_d_cache_loop
+    addi    $a2,1    
+    
+    lui     $a1,0x0002          # Leave with cache enabled
+    jr      $ra
+    mtc0    $a1,$12       
     .set    reorder
     .end    entry
  
