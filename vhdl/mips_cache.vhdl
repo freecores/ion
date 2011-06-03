@@ -1,18 +1,18 @@
 --------------------------------------------------------------------------------
--- mips_cache.vhdl -- cache module
+-- mips_cache.vhdl -- cache + memory interface module
 --
 -- This module contains both MIPS caches (I-Cache and D-Cache) combined with
 -- all the glue logic used to decode and interface external memories and
 -- devices, both synchronous and asynchronous. 
 -- Everything that goes into or comes from the CPU passes through this module.
 --
--- The D-Cache is unimplemented in this version, and uses the logic from the
--- stub cache module.
---
+-- See a list of known problems at the bottom of this header.
+-- 
+--------------------------------------------------------------------------------
 -- Main cache parameters:
 --
 -- I-Cache: 256 4-word lines, direct mapped.
--- D-Cache: 256 4-word lines, direct mapped, write-through (UNIMPLEMENTED YET)
+-- D-Cache: 256 4-word lines, direct mapped, write-through
 --
 -- The cache works mostly like the R3000 caches, except for the following 
 -- traits:
@@ -31,7 +31,7 @@
 -- implemented at all -- no cache swapping, etc.
 --
 -- 3.- In this version, all areas of memory are cacheable, except those mapped 
--- as MT_IO_SYNC or MT_UNMAPPEd in mips_pkg. 
+-- as MT_IO_SYNC or MT_UNMAPPED in mips_pkg. 
 -- Since you can enable or disable the cache at will this difference doesn't 
 -- seem too important.
 -- There is a 'cacheable' flag in the t_range_attr record which is currently 
@@ -89,6 +89,11 @@
 -- found any other way to overcome this bug, not even with the helop of the  
 -- Altera support forum.
 --
+-- @note4: Startup values for the cache tables
+-- 
+-- The cache tables has been given startup values; these are only for simulation
+-- convenience and have no effect on the cache behaviour (and obviuosly they
+-- are only used after FPGA config, not after reset). 
 --------------------------------------------------------------------------------
 -- This module interfaces the CPU to the following:
 --
@@ -101,8 +106,6 @@
 -- and all outputs are registered (tco should be minimal).
 -- SRAM data inputs are NOT registered, though. They go through a couple muxes
 -- before reaching the first register so watch out for tsetup.
---
--- This is a work in progress, based on the dummy cache module. 
 --
 --------------------------------------------------------------------------------
 -- External FPGA signals
@@ -131,6 +134,11 @@
 -- KNOWN PROBLEMS:
 --
 -- 1.- All parameters hardcoded -- generics are almost ignored.
+-- 2.- SRAM read state machine does not guarantee internal FPGA Thold. 
+--     Currently it works because the FPGA hold tines (including an input mux
+--     in the parent module) are far smaller than the SRAM response times, but
+--     it would be better to insert an extra cycle after the wait states in
+--     the sram read state machine.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -169,7 +177,6 @@ entity mips_cache is
         mem_wait        : out std_logic;
         cache_enable    : in std_logic;
         ic_invalidate   : in std_logic;
-        -- Asserted for 1 cycle after code/data access to unmapped area
         unmapped        : out std_logic;
 
         -- interface to FPGA i/o devices
@@ -250,6 +257,7 @@ type t_cache_state is (
 
     data_refill_bram_0,         -- rd addr in bram_rd_addr
     data_refill_bram_1,         -- rd data in bram_rd_data
+    data_refill_bram_2,
 
     data_read_io_0,             -- rd addr on io_rd_addr, io_vma active
     data_read_io_1,             -- rd data on io_rd_data
@@ -267,7 +275,8 @@ type t_cache_state is (
     data_ignore_read,           -- hook for raising error flag FIXME untested
 
     -- Other states -------------------------------------------------
-    
+
+    --code_wait_for_dcache,       -- wait for D-cache to stop using the buses
     bug                         -- caught an error in the state machine
    );
 
@@ -284,17 +293,23 @@ signal ws_wait_done :       std_logic;
 -- Refill word counters
 signal code_refill_ctr :    integer range 0 to LINE_SIZE-1;
 signal data_refill_ctr :    integer range 0 to LINE_SIZE-1;
+signal data_refill_start :  std_logic;
+signal data_refill_end :    std_logic;
+
 
 -- CPU interface registers ------------------------------------------
+-- Registered CPU addresses
 signal data_rd_addr_reg :   t_pc;
 signal data_wr_addr_reg :   t_pc;
 signal code_rd_addr_reg :   t_pc;
 
+-- Data write register (data to be written to external RAM)
 signal data_wr_reg :        std_logic_vector(31 downto 0);
+-- Registered byte_we vector
 signal byte_we_reg :        std_logic_vector(3 downto 0);
 
 -- SRAM interface ---------------------------------------------------
--- Stores first (high) HW read from SRAM
+-- Stores first (high) Half-Word read from SRAM
 signal sram_rd_data_reg :   std_logic_vector(31 downto 8);
 -- Data read from SRAM, valid in refill_1
 signal sram_rd_data :       t_word;
@@ -304,11 +319,12 @@ signal sram_rd_data :       t_word;
 
 subtype t_line_addr is std_logic_vector(LINE_NUMBER_SIZE-1 downto 0);
 subtype t_word_addr is std_logic_vector(LINE_ADDR_SIZE-1 downto 0);
+
 subtype t_code_tag is std_logic_vector(CODE_TAG_SIZE+1-1 downto 0);
 type t_code_tag_table is array(CACHE_SIZE-1 downto 0) of t_code_tag;
 type t_code_line_table is array((CACHE_SIZE*LINE_SIZE)-1 downto 0) of t_word;
 
--- Code tag table (stores line tags)
+-- Code tag table (stores line tags) (@note4)
 signal code_tag_table :     t_code_tag_table   := (others => "000000000000000");
 -- Code line table  (stores lines)
 signal code_line_table :    t_code_line_table  := (others => X"00000000");
@@ -326,12 +342,6 @@ signal code_word_addr :     t_word_addr;
 -- Code cache word address (write to cache in refills)
 signal code_word_addr_wr :  t_word_addr;
 
--- This stuff is part of the workaround for @note3
-attribute noprune: boolean;
-attribute noprune of code_word_addr : signal is true;
-attribute noprune of code_word_addr_wr : signal is true;
-attribute noprune of ps : signal is true;
-
 -- Word written into code cache
 signal code_refill_data :   t_word;
 -- Address the code refill data is fetched from
@@ -348,21 +358,58 @@ signal code_miss_uncached : std_logic;
 -- '1' when the I-cache state machine stalls the pipeline (mem_wait)
 signal code_wait :          std_logic;
 
--- D-cache -- most of this is unimplemented -------------------------
-subtype t_data_tag is std_logic_vector(23 downto 2);
+-- D-cache ----------------------------------------------------------
+
+subtype t_data_tag is std_logic_vector(DATA_TAG_SIZE+1-1 downto 0);
+type t_data_tag_table is array(CACHE_SIZE-1 downto 0) of t_data_tag;
+type t_data_line_table is array((CACHE_SIZE*LINE_SIZE)-1 downto 0) of t_word;
+
+-- Data tag table (stores line tags)
+signal data_tag_table :     t_data_tag_table   := (others => "000000000000000");
+-- Data line table  (stores lines)
+signal data_line_table :    t_data_line_table  := (others => X"00000000");
+
+-- Asserted when the D-Cache line table is to be written to
+signal update_data_line :   std_logic;
+signal update_data_tag :    std_logic;
+
+-- Tag from data load address ('target' address, straight from CPU lines)
+signal data_tag :           t_data_tag;
+-- Registered data_tag, used matching after reading from data_tag_table
+signal data_tag_reg :       t_data_tag;
+-- Tag read from cache (will be matched against data_tag_reg)
 signal data_cache_tag :     t_data_tag;
-signal data_cache_tag_store : t_data_tag;
-signal data_cache_store :   t_word;
--- active when there's a write waiting to be done
-signal write_pending :      std_logic;
--- active when there's a read waiting to be done
-signal read_pending :       std_logic;
--- data word read from cache
+-- '1' when the read OR write data address tag matches the cache tag
+signal data_tags_match :    std_logic;
+-- Data cache line address for read and write ports
+signal data_line_addr :     t_line_addr;
+-- Data cache word address (read from cache)
+signal data_word_addr :     t_word_addr;
+-- Data cache word address (write to cache in refills)
+signal data_word_addr_wr :  t_word_addr;
+
+-- Word written into data cache
+signal data_refill_data :   t_word;
+-- Address the code refill data is fetched from (word address)
+signal data_refill_addr :   t_pc;
+
+-- Data word read from cache
 signal data_cache_rd :      t_word;
--- '1' when data_cache_rd is not valid due to a cache miss
+-- Raised when data_cache_rd is not valid due to a cache miss
 signal data_miss :          std_logic;
--- '1' when the D-cache state machine stalls the pipeline (mem_wait)
+-- Data miss logic, portion used with cache enabledº
+signal data_miss_cached :   std_logic;
+-- Data miss logic, portion used with cach disabled
+signal data_miss_uncached : std_logic;
+-- Active when the data tag comparison result is valid (1 cycle after rd_vma)
+-- Note: no relation to byte_we. 
+signal data_tag_match_valid:std_logic;
+-- Active when the D-cache state machine stalls the pipeline (mem_wait)
 signal data_wait :          std_logic;
+-- Active when there's a write waiting to be done
+signal write_pending :      std_logic;
+-- Active when there's a read waiting to be done
+signal read_pending :       std_logic;
 
 
 -- Address decoding -------------------------------------------------
@@ -396,10 +443,12 @@ begin
 end process cache_state_machine_reg;
 
 -- Unified control state machine for I-Cache and D-cache -----------------------
+-- FIXME The state machine deals with all supported widths and types of memory, 
+-- there should be a simpler version with only SRAM/ROM and DRAM.
 control_state_machine_transitions:
-process(ps, code_rd_vma, code_miss, 
+process(ps, code_rd_vma, data_rd_vma, code_miss, 
         data_wr_attr.mem_type, data_rd_attr.mem_type, code_rd_attr.mem_type, 
-        ws_wait_done, code_refill_ctr,
+        ws_wait_done, code_refill_ctr, data_refill_ctr,
         write_pending, read_pending)
 begin
     case ps is
@@ -456,7 +505,7 @@ begin
                 when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
                 when MT_IO_SYNC     => ns <= data_write_io_0;
                 -- FIXME ignore write to undecoded area (clear pending flag)
-                when others         => ns <= data_ignore_write;
+                when others         => ns <= ps;
                 end case;
     
             elsif read_pending='1' then
@@ -494,7 +543,7 @@ begin
                     when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
                     when MT_IO_SYNC     => ns <= data_write_io_0;
                     -- FIXME ignore write to undecoded area (clear pending flag)
-                    when others         => ns <= data_ignore_write;
+                    when others         => ns <= ps;
                     end case;
     
                 elsif read_pending='1' then
@@ -604,7 +653,11 @@ begin
 
     when data_refill_sram8_3 =>
         if ws_wait_done='1' then
-            ns <= idle;
+            if data_refill_ctr/=LINE_SIZE-1 then
+                ns <= data_refill_sram8_0;
+            else
+                ns <= idle;
+            end if;
         else
             ns <= ps;
         end if;
@@ -618,7 +671,11 @@ begin
 
     when data_refill_sram_1 =>
         if ws_wait_done='1' then
-            ns <= idle;
+            if data_refill_ctr=LINE_SIZE-1 then
+                ns <= idle;
+            else
+                ns <= data_refill_sram_0;
+            end if;
         else
             ns <= ps;
         end if;
@@ -627,7 +684,28 @@ begin
         ns <= data_refill_bram_1;
 
     when data_refill_bram_1 =>
-        ns <= idle;
+        ns <= data_refill_bram_2;
+
+    when data_refill_bram_2 => 
+        if data_refill_ctr/=(LINE_SIZE-1) then
+            -- Still not finished refilling line, go for next word
+            ns <= data_refill_bram_0;
+        else
+            if read_pending='1' then
+                case data_rd_attr.mem_type is
+                when MT_BRAM        => ns <= data_refill_bram_0;
+                when MT_SRAM_16B    => ns <= data_refill_sram_0;
+                when MT_SRAM_8B     => ns <= data_refill_sram8_0;
+                when MT_IO_SYNC     => ns <= data_read_io_0;
+                -- FIXME ignore read from undecoded area (clear pending flag)
+                when others         => ns <= data_ignore_read;
+                end case;
+            else
+                ns <= idle;
+            end if;
+        end if;
+
+
 
     when data_writethrough_sram_0a =>
         ns <= data_writethrough_sram_0b;
@@ -667,11 +745,9 @@ begin
         end if;
 
     when data_ignore_write =>
-        -- Access to unmapped area. We have 1 cycle to do something.
         ns <= idle;
 
     when data_ignore_read =>
-        -- Access to unmapped area. We have 1 cycle to do something.
         ns <= idle;
 
     -- Exception states (something went wrong) ----------------------
@@ -679,6 +755,7 @@ begin
     when code_crash =>
         -- Attempted to fetch from i/o area. This is a software bug, probably,
         -- and should trigger a trap. We have 1 cycle to do something about it.
+        -- FIXME do something about wrong fetch: trap, etc.
         -- After this cycle, back to normal.
         ns <= idle;
 
@@ -769,15 +846,43 @@ begin
                ps=code_refill_sram8_3) and 
                ws_wait_done='1'  and
                code_refill_ctr/=0 then
-            code_refill_ctr <= code_refill_ctr-1;
+            code_refill_ctr <= code_refill_ctr-1; --  FIXME explain downcount
             end if;
         end if;
     end if;
 end process code_refill_word_counter;
 
+with ps select data_refill_end <=
+    '1' when data_refill_bram_2,
+    '1' when data_refill_sram_1,
+    '1' when data_refill_sram8_3,
+    '0' when others;
+
+data_refill_word_counter:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' or (data_miss='1' and ps=idle) then
+            data_refill_ctr <= 0;
+        else
+            if data_refill_end='1' and ws_wait_done='1' then
+                if data_refill_ctr=(LINE_SIZE-1) then
+                    data_refill_ctr <= 0;
+                else
+                    data_refill_ctr <= data_refill_ctr + 1;
+                end if;
+            end if;
+        end if;
+    end if;
+end process data_refill_word_counter;
+
 --------------------------------------------------------------------------------
 -- CPU interface registers and address decoding --------------------------------
 
+data_refill_start <= 
+    '1' when ((ps=data_refill_sram_0 or ps=data_refill_sram8_0 or 
+            ps=data_refill_bram_0) and data_refill_ctr=0)
+    else '0';
 
 -- Everything coming and going to the CPU is registered, so that the CPU has
 -- some timing marging. These are those registers.
@@ -792,16 +897,14 @@ begin
             read_pending <= '0';
             byte_we_reg <= "0000";
         else
-            -- Raise 'read_pending' at 1st cycle of a data read, clear it when
-            -- the read (and/or refill) operation has been done.
-            -- data_rd_addr_reg always has the addr of any pending read
-            if data_rd_vma='1' then
+            -- Raise 'read_pending' as soon as we know a read is to be done.
+            -- Clear it as soon as the read/refill has STARTED. 
+            -- Can be raised again after a read is started and before it's done.
+            -- data_rd_addr_reg always has the addr of any pending read.
+            if data_miss='1' then --data_rd_vma='1' then
                 read_pending <= '1';
                 data_rd_addr_reg <= data_addr(31 downto 2);
-            elsif ps=data_refill_sram_1 or
-                  ps=data_refill_sram8_3 or
-                  ps=data_refill_bram_1 or
-                  ps=data_read_io_0 or
+            elsif data_refill_start='1' or ps=data_read_io_0 or
                   ps=data_ignore_read then
                 read_pending <= '0';
             end if;
@@ -809,7 +912,7 @@ begin
             -- Raise 'write_pending' at the 1st cycle of a write, clear it when
             -- the write (writethrough actually) operation has been done.
             -- data_wr_addr_reg always has the addr of any pending write
-            if byte_we/="0000" and ps=idle then
+            if byte_we/="0000" and ps=idle and write_pending='0' then
                 byte_we_reg <= byte_we;
                 data_wr_reg <= data_wr;
                 data_wr_addr_reg <= data_addr(31 downto 2);
@@ -844,6 +947,11 @@ code_refill_addr <=
     code_rd_addr_reg(code_rd_addr_reg'high downto 4) & 
     conv_std_logic_vector(code_refill_ctr,LINE_INDEX_SIZE);
 
+data_refill_addr <= 
+    data_rd_addr_reg(data_rd_addr_reg'high downto 4) & 
+    conv_std_logic_vector(data_refill_ctr,LINE_INDEX_SIZE);
+
+
 
 -- Address decoding ------------------------------------------------------------
 
@@ -867,6 +975,7 @@ with ps select unmapped <=
     '1' when data_ignore_write,
     '0' when others;
 
+
 --------------------------------------------------------------------------------
 -- BRAM interface (BRAM is FPGA Block RAM)
 
@@ -874,7 +983,8 @@ with ps select unmapped <=
 -- and data r/w from BRAM.
 -- (note both inputs to this mux are register outputs)
 bram_rd_addr <=
-    data_rd_addr_reg(bram_rd_addr'high downto 2)
+    --data_rd_addr_reg(bram_rd_addr'high downto 2)
+    data_refill_addr(bram_rd_addr'high downto 2)
         when ps=data_refill_bram_0 else
     code_refill_addr(bram_rd_addr'high downto 2) ;
 
@@ -884,9 +994,6 @@ bram_data_rd_vma <= '1' when ps=data_refill_bram_1 else '0';
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 -- Code cache
-
--- Most of the code cache is provisional, though it has already been tried on
--- hardware.
 
 -- CPU is wired directly to cache output, no muxes -- or at least is SHOULD. 
 -- Due to an apparent bug in Quartus-2 (V9.0 build 235), if we omit this extra
@@ -983,41 +1090,173 @@ with ps select code_refill_data <=
 
 --------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
--- Data cache (unimplemented -- uses stub cache logic)
+-- Data cache (direct mapped, nearly identical to code cache)
 
--- CPU data input mux: direct cache output OR uncached io input
-with ps select data_rd <=
+
+-- (@note3)
+with ps select data_rd <= 
     io_rd_data      when data_read_io_1,
     data_cache_rd   when others;
 
--- All the tag match logic is unfinished and will be simplified away in synth.
--- The 'cache' is really a single register.
-data_cache_rd <= data_cache_store;
-data_cache_tag <= data_cache_tag_store;
+-- Register here the requested data tag so we can compare it to the tag in the
+-- cache store. Note we register and match the 'line valid' bit together with
+-- the rest of the tag.
+data_tag_register:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        -- Together with the tag value, we register the valid bit against which 
+        -- we will match after reading the tag table.
+        -- The valid bit will be '0' for normal accesses or '1' when the cache 
+        -- is disabled OR we're invalidating lines. This ensures that the cache
+        -- will miss in those cases.
+        data_tag_reg <= (ic_invalidate or (not cache_enable)) & 
+                        data_tag(data_tag'high-1 downto data_tag'low);
+    end if;
+end process data_tag_register;
 
-data_cache_memory:
+
+-- The tags are 'compared' the cycle after data_rd_vma. 
+-- FIXME explain role of ic_invalidate in this.
+-- Note: writethroughs use the tag match result at a different moment.
+data_tag_comparison_validation:
 process(clk)
 begin
     if clk'event and clk='1' then
         if reset='1' then
-            -- in the real hardware the tag store can't be reset and it's up
-            -- to the SW to initialize the cache.
-            data_cache_tag_store <= (others => '0');
-            data_cache_store <= (others => '0');
+            data_tag_match_valid <= '0';
         else
-            -- Refill data cache if necessary
-            if ps=data_refill_sram_1 or ps=data_refill_sram8_3 then
-                data_cache_tag_store <=
-                    "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
-                data_cache_store <= sram_rd_data;
-            elsif ps=data_refill_bram_1 then
-                data_cache_tag_store <=
-                    "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
-                data_cache_store <= bram_rd_data;
-            end if;
+            data_tag_match_valid <= data_rd_vma and not ic_invalidate;
         end if;
     end if;
-end process data_cache_memory;
+end process data_tag_comparison_validation;
+
+
+-- The D-Cache misses when the tag in the cache is not the tag we want or 
+-- it is not valid.
+
+-- When cache is disabled, assert 'miss' after vma 
+data_miss_uncached <= data_tag_match_valid and not ic_invalidate;
+-- When cache is enabled, assert 'miss' after the comparison is done.
+data_tags_match <= '1' when (data_tag_reg = data_cache_tag) else '0';
+data_miss_cached <= '1' when data_tag_match_valid='1' and data_tags_match='0'
+                    else '0';
+
+-- Select the proper code_miss signal
+data_miss <= data_miss_uncached when cache_enable='0' else data_miss_cached;
+
+
+-- Code line address used for both read and write into the table
+data_line_addr <=
+    -- when the CPU wants to invalidate D-Cache lines, the addr comes from the
+    -- data bus (see @note1)
+    data_wr(7 downto 0) when byte_we(3)='1' and ic_invalidate='1' 
+    -- otherwise the addr comes from the code address as usual
+    else data_addr(11 downto 4);
+
+data_word_addr <= data_addr(11 downto 2);
+data_word_addr_wr <= data_line_addr & conv_std_logic_vector(data_refill_ctr,LINE_INDEX_SIZE);
+-- NOTE: the tag will be marked as INVALID ('1') when the CPU is invalidating 
+-- code lines (@note1)
+data_tag <= 
+    (ic_invalidate or not data_tag_match_valid) &
+    data_addr(31 downto 27) &
+    data_addr(11+DATA_TAG_SIZE-5 downto 11+1);
+
+-- The data tag table will be written to...
+update_data_tag <= '1' when 
+    -- ...when a refill word is read (redundant writes) or...
+    (ps=data_refill_sram8_3 or ps=data_refill_sram_1 or ps=data_refill_bram_1) or
+    -- ...when writing through a line which is cached or...
+    (ps=data_writethrough_sram_0a and data_tags_match='1') or
+    -- ...when a D-Cache line invalidation access is made
+    (data_rd_vma='1' and ic_invalidate='1')
+    else '0';
+    
+data_tag_memory:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if update_data_tag='1' then
+            data_tag_table(conv_integer(data_line_addr)) <= data_tag;
+        end if;
+    
+        data_cache_tag <= data_tag_table(conv_integer(data_line_addr));
+    end if;
+end process data_tag_memory;
+
+
+update_data_line <= '1' when ps=data_refill_sram8_3 or ps=data_refill_sram_1 or ps=data_refill_bram_1
+                    else '0';
+
+data_line_memory:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if update_data_line='1' then
+            --assert 1=0
+            --report "D-Cache["& str(conv_integer(data_word_addr_wr),10) & "] = 0x"& hstr(data_refill_data)
+            --severity note;
+            data_line_table(conv_integer(data_word_addr_wr)) <= data_refill_data;
+        end if;
+
+        data_cache_rd <= data_line_table(conv_integer(data_word_addr));
+    end if;
+end process data_line_memory;
+
+-- Data can only come from SRAM (including 16- and 8- bit interfaces)
+with ps select data_refill_data <=
+    bram_rd_data    when data_refill_bram_1,
+    sram_rd_data    when others;
+
+
+
+
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+-- OLD Data cache (unimplemented -- uses stub cache logic)
+
+--  -- CPU data input mux: direct cache output OR uncached io input
+--  with ps select data_rd <=
+--      io_rd_data      when data_read_io_1,
+--      data_cache_rd   when others;
+--  
+--  -- All the tag match logic is unfinished and will be simplified away in synth.
+--  -- The 'cache' is really a single register.
+--  data_cache_rd <= data_cache_store;
+--  data_cache_tag <= data_cache_tag_store;
+--  
+--  data_cache_memory:
+--  process(clk)
+--  begin
+--      if clk'event and clk='1' then
+--          if reset='1' then
+--              -- in the real hardware the tag store can't be reset and it's up
+--              -- to the SW to initialize the cache.
+--              data_cache_tag_store <= (others => '0');
+--              data_cache_store <= (others => '0');
+--          else
+--              -- Refill data cache if necessary
+--              if ps=data_refill_sram_1 or ps=data_refill_sram8_3 then
+--                  data_cache_tag_store <=
+--                      "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
+--                  data_cache_store <= sram_rd_data;
+--              elsif ps=data_refill_bram_1 then
+--                  data_cache_tag_store <=
+--                      "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
+--                  data_cache_store <= bram_rd_data;
+--              end if;
+--          end if;
+--      end if;
+--  end process data_cache_memory;
+
+
+
+
+
+
+
 
 
 --------------------------------------------------------------------------------
@@ -1140,7 +1379,7 @@ io_rd_vma <= '1' when ps=data_read_io_0 else '0';
 
 -- FIXME data_miss should be raised only on the cycle a data miss is detected,
 -- otherwise it overlaps data_wait
-data_miss <= read_pending; -- FIXME stub; will change with real D-Cache
+--@@@data_miss <= read_pending; -- FIXME stub; will change with real D-Cache
 
 -- Stall the CPU when either state machine needs it
 mem_wait <= 
@@ -1179,8 +1418,11 @@ with ps select data_wait <=
     '1' when data_refill_sram8_3,
     '1' when data_refill_bram_0,
     '1' when data_refill_bram_1,
+    '1' when data_refill_bram_2,
     '1' when data_read_io_0,
+    -- Otherwise, we stall the CPU the cycle after a RD or WR is triggered
     read_pending or write_pending when idle,
+    
     '0' when others;
 
 end architecture direct;
