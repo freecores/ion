@@ -19,6 +19,11 @@
 # will be refactored eventually.
 #-------------------------------------------------------------------------------
 
+    #---- Cache parameters
+    .set ICACHE_NUM_LINES, 256              # no. of lines in the I-Cache
+    .set DCACHE_NUM_LINES, 256              # no. of lines in the D-Cache
+    .set DCACHE_LINE_SIZE, 4                # D-Cache line size in words
+
     # The stack size can be defined from the assembler command line
     .ifndef STACK_SIZE
     .set    STACK_SIZE,         1024        # by default, reserve 1KB
@@ -41,6 +46,10 @@ entry:
     la      $4, _end                # $2 = .bss_end
     la      $sp, init_stack+STACK_SIZE-24 #initialize stack pointer
 
+    # Initialize the cache
+    jal     setup_cache
+    nop
+    
     # Clear BSS area
 $BSS_CLEAR:
     sw      $0, 0($5)
@@ -147,6 +156,46 @@ isr_return:
    .set     at
 
 
+# void setup_cache(void) -- invalidates all I- and D-Cache lines (uses no RAM)
+setup_cache:
+    lui     $a0,0x0001          # Enable I-cache line invalidation
+    mtc0    $a0,$12
+    
+    # In order to invalidate a I-Cache line we have to write its tag number to 
+    # any address while bits CP0[12].17:16=01. The write will be executed as a
+    # regular write too, as a side effect, so we need to choose a harmless 
+    # target address. The BSS will do -- it will be cleared later.
+    # We'll cover all ICACHE_NUM_LINES lines no matter what the starting 
+    # address is, anyway.
+    
+    la      $a0,__bss_start
+    li      $a2,0
+    li      $a1,ICACHE_NUM_LINES-1
+    
+inv_i_cache_loop:
+    sw      $a2,0($a0)
+    blt     $a2,$a1,inv_i_cache_loop
+    addi    $a2,1
+    
+    # Now, the D-Cache is different. To invalidate a D-Cache line you just 
+    # read from it (by proper selection of a dummy target address)  while bits 
+    # CP0[12].17:16=01. The data read is undefined and should be discarded.
+
+    li      $a0,0               # Use any base address that is mapped
+    li      $a2,0
+    li      $a1,DCACHE_NUM_LINES-1
+    
+inv_d_cache_loop:
+    lw      $zero,0($a0)
+    addi    $a0,DCACHE_LINE_SIZE*4
+    blt     $a2,$a1,inv_d_cache_loop
+    addi    $a2,1    
+    
+    lui     $a1,0x0002          # Leave with cache enabled
+    jr      $ra
+    mtc0    $a1,$12   
+   
+   
 #-- FIXME inherited from Plasma, needs to be refactored
    .global  setjmp
    .ent     setjmp
