@@ -369,7 +369,9 @@ void start_load(t_state *s, uint32_t addr, int rt, int data);
 
 /** Log to file a memory read operation (not including target reg change) */
 void log_read(t_state *s, int full_address, int word_value, int size, int log){
-    if(log_enabled(s) && log!=0){
+    /* if bit CP0.16==1, this is a D-Cache line invalidation access and
+           the HW will not read any actual data, so skip the log (@note1) */
+    if(log_enabled(s) && log!=0 && !(s->status & 0x00010000)){
         fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD\n",
               s->op_addr, full_address, word_value);
     }
@@ -421,7 +423,9 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     }
     if(!ptr){
         /* address out of mapped blocks: log and return zero */
-        if(log_enabled(s) && log!=0){
+        /* if bit CP0.16==1, this is a D-Cache line invalidation access and
+           the HW will not read any actual data, so skip the log (@note1) */
+        if(log_enabled(s) && log!=0 && !(s->status & (1<<16))){
             fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD UNMAPPED\n",
                 s->pc, full_address, 0);
         }
@@ -521,7 +525,8 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
         }
 
         fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR\n",
-                s->op_addr, address&0xfffffffc, mask, dvalue);
+                //s->op_addr, address&0xfffffffc, mask, dvalue);
+                s->op_addr, address, mask, dvalue);
     }
 
     if((address&0xffff0000)==DBG_REGS){
@@ -833,15 +838,15 @@ void cycle(t_state *s, int show_mode){
                            s->pc_next=r[rs]; break;
         case 0x0a:/*MOVZ*/ if(!r[rt]) r[rd]=r[rs];   break;  /*IV*/
         case 0x0b:/*MOVN*/ if(r[rt]) r[rd]=r[rs];    break;  /*IV*/
-        case 0x0c:/*SYSCALL*/ //trap_cause = 8;
-                              //s->exceptionId=1;
+        case 0x0c:/*SYSCALL*/ trap_cause = 8;
+                              s->exceptionId=1;
                               /*
                               FIXME enable when running uClinux
                               printf("SYSCALL (%08x)\n", s->pc);
                               */
                               break;
-        case 0x0d:/*BREAK*/   //trap_cause = 9;
-                              //s->exceptionId=1;
+        case 0x0d:/*BREAK*/   trap_cause = 9;
+                              s->exceptionId=1;
                               /*
                               FIXME enable when running uClinux
                               printf("BREAK (%08x)\n", s->pc);
@@ -907,7 +912,7 @@ void cycle(t_state *s, int show_mode){
     case 0x10:/*COP0*/
         if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
             switch(rd){
-                case 12: r[rt]=s->status; break;
+                case 12: r[rt]=s->status & 0xffff; break;
                 case 13: r[rt]=s->cp0_cause; break;
                 case 14: r[rt]=s->epc; break;
                 case 15: r[rt]=0x00000200; break;
@@ -917,7 +922,8 @@ void cycle(t_state *s, int show_mode){
             }
         }
         else{                         //move to CP0 (mtc0)
-            s->status=r[rt]&1;
+            /* FIXME check CF= reg address */
+            s->status=r[rt];
             if(s->processId && (r[rt]&2)){
                 s->userMode|=r[rt]&2;
                 //printf("CpuStatus=%d %d %d\n", r[rt], s->status, s->userMode);
@@ -986,7 +992,9 @@ void cycle(t_state *s, int show_mode){
 //      case 0x3e:/*SDC2*/ break;
 //      case 0x3f:/*SDC3*/ break;
     default:
+        ;
         /* FIXME should trap unimplemented opcodes */
+        /* FIXME newlib */
         printf("ERROR2 address=0x%x opcode=0x%x\n", s->pc, opcode);
         s->wakeup=1;
     }
@@ -1347,19 +1355,20 @@ void log_cycle(t_state *s){
     if(log_enabled(s)){
         log_pc = s->op_addr;
 
-        for(i=0;i<32;i++){
+        /* skip register zero which does not change */
+        for(i=1;i<32;i++){
             if(s->t.pr[i] != s->r[i]){
                 fprintf(s->t.log, "(%08X) [%02X]=%08X\n", log_pc, i, s->r[i]);
             }
             s->t.pr[i] = s->r[i];
         }
         if(s->lo != s->t.lo){
-            fprintf(s->t.log, "(%08X) [LO]=%08X\n", log_pc, s->lo);
+            //fprintf(s->t.log, "(%08X) [LO]=%08X\n", log_pc, s->lo);
         }
         s->t.lo = s->lo;
 
         if(s->hi != s->t.hi){
-            fprintf(s->t.log, "(%08X) [HI]=%08X\n", log_pc, s->hi);
+            //fprintf(s->t.log, "(%08X) [HI]=%08X\n", log_pc, s->hi);
         }
         s->t.hi = s->hi;
 
