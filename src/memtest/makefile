@@ -48,7 +48,7 @@ flashtest: memtest_main
 # Create VHDL file for simulation test bench using TB2 template
 memtest_sim: memtest flashtest
 	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xbfc00000 \
-		--flash flash.bin --flash_size 1024 \
+		--flash flash.bin --flash_size 4096 \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
@@ -56,7 +56,7 @@ memtest_sim: memtest flashtest
 
 # Create VHDL file for hardware demo
 memtest_demo: memtest flashtest
-	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xbfc00000 \
+	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xb0000000 \
 	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 	-v $(SRC_DIR)/mips_mpu1_template.vhdl \
 	-o $(DEMO_DIR)/mips_mpu.vhdl -e mips_mpu
