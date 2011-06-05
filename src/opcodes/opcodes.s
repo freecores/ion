@@ -111,6 +111,7 @@ trap_return:
 trap_return_delay_slot:
     addi    $k1,$k1,4           # skip jump instruction too
     jr      $k1                 # (we just added 8 to epc)
+    nop
 
 
 StartTest:
