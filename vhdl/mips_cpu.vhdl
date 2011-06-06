@@ -4,23 +4,19 @@
 -- project:       ION (http://www.opencores.org/project,ion_cpu)
 -- author:        Jose A. Ruiz (ja_rd@hotmail.com)
 -- created:       Jan/11/2011
--- last modified: Apr/13/2011 (ja_rd@hotmail.com)
+-- last modified: Jun/05/2011 (ja_rd@hotmail.com)
 --------------------------------------------------------------------------------
 -- Use under the terms of the GPL.
 -- Software 'as is' without warranty.  Author liable for nothing.
 --
 --------------------------------------------------------------------------------
+-- Please read file /doc/ion_project.txt for usage instructions.
+--------------------------------------------------------------------------------
 --### MIPS-I things not implemented
---  # Invalid instruction trapping:
---      * invalid opcodes do trap but the logic that prevents bad opcodes from
---        having side affects has not been tested yet.
---  # Kernel/user status
---  # RTE instruction (or ERET)
---  # Most of the CP0 registers and of course all of the CP1
---  # External interrupts
 --
---### Things implemented but not tested
---  # Memory pause input -- only tested with stub cache
+-- 1.- RTE instruction (or ERET) missing, with CP0.SR KUo/IEo & KUP/IEp flags.
+-- 2.- Most of the R3000 CP0 registers and of course all of the CP1.
+-- 3.- External interrupts missing, with CP0.SR IR, NMI and IM7..0 flags.
 --
 --### Things with provisional implementation
 -- 
@@ -28,6 +24,16 @@
 --     if the target register is not used in the following instruction. So that
 --     every load takes two cycles.
 --     The interlock logic should check register indices (@note2)
+-- 2.- CP0 SR (status register) bits KUo/IEo & KUP/IEp are missing.
+--     This means that EXCEPTIONS CAN'T BE NESTED in this version of the CPU.
+-- 3.- Invalid instruction side effects:
+--     Invalid opcodes do trap but the logic that prevents bad opcodes from
+--     having side affects has not been tested yet.
+-- 4.- Kernel/user status.
+--     When in user mode, COP* instructions will trigger a 'CpU' exception.
+--     BUT there's no address checking and user code can still access kernel 
+--     space in this version.
+--     Besides, see point 2 above about the missing SR bits.
 --
 --------------------------------------------------------------------------------
 
@@ -137,8 +143,11 @@ signal p1_op_special :      std_logic;
 signal p1_exception :       std_logic;
 signal p1_do_reg_jump :     std_logic;
 signal p1_do_zero_ext_imm : std_logic;
+signal p1_set_cp :          std_logic;
+signal p1_get_cp :          std_logic;
 signal p1_set_cp0 :         std_logic;
 signal p1_get_cp0 :         std_logic;
+signal p1_rfe :             std_logic;
 signal p1_alu_op2_sel :     std_logic_vector(1 downto 0);
 signal p1_alu_op2_sel_set0: std_logic_vector(1 downto 0);
 signal p1_alu_op2_sel_set1: std_logic_vector(1 downto 0);
@@ -165,6 +174,7 @@ signal p1_muldiv_started :  std_logic;
 signal p1_muldiv_stall :    std_logic;
 
 signal p1_unknown_opcode :  std_logic;
+signal p1_cp_unavailable :  std_logic;
 
 --------------------------------------------------------------------------------
 -- Pipeline stage 2
@@ -201,8 +211,8 @@ signal reset_done :         std_logic;
 --------------------------------------------------------------------------------
 -- CP0 registers and signals
 
--- CP0[12]: status register 
-signal cp0_status :         std_logic_vector(1 downto 0);
+-- CP0[12]: status register, KUo/IEo & KUP/IEp & KU/IE  bits
+signal cp0_status :         std_logic_vector(5 downto 0);
 -- CP0[12]: status register, cache control
 signal cp0_cache_control :  std_logic_vector(17 downto 16);
 -- Output of CP0 register bank (only a few regs are implemented)
@@ -593,13 +603,24 @@ with p1_jump_cond_sel select p0_jump_cond_value <=
 
 -- Decode instructions that launch exceptions
 p1_exception <= '1' when 
-    (p1_op_special='1' and p1_ir_reg(5 downto 1)="00110") or
-    p1_unknown_opcode='1'
+    (p1_op_special='1' and p1_ir_reg(5 downto 1)="00110") or -- syscall/break
+    p1_unknown_opcode='1' or
+    p1_cp_unavailable='1'
     else '0';
 
--- Decode MTC0/MFC0 instructions
-p1_set_cp0 <= '1' when p1_ir_reg(31 downto 21)="01000000100" else '0';
-p1_get_cp0 <= '1' when p1_ir_reg(31 downto 21)="01000000000" else '0';
+-- Decode MTC0/MFC0 instructions (see @note3)
+p1_set_cp  <= '1' when p1_ir_reg(31 downto 28)="0100" and 
+                       p1_ir_reg(25 downto 21)="00100" else '0';
+p1_get_cp  <= '1' when p1_ir_reg(31 downto 28)="0100" and 
+                       p1_ir_reg(25 downto 21)="00000" else '0';
+
+p1_set_cp0 <= '1' when p1_ir_reg(27 downto 26)="00" and p1_set_cp='1' else '0';
+p1_get_cp0 <= '1' when p1_ir_reg(27 downto 26)="00" and p1_get_cp='1' else '0';
+
+-- Decode RFE instruction (see @note3)
+p1_rfe <= '1' when p1_ir_reg(31 downto 21)="01000010000" and 
+                   p1_ir_reg(5 downto 0)="010000"
+          else '0';
 
 -- Raise some signals for some particular group of opcodes
 p1_op_special <= '1' when p1_ir_op="000000" else '0'; -- group '0' opcodes
@@ -768,6 +789,13 @@ p1_unknown_opcode <= '1' when
 
     else '0';
 
+p1_cp_unavailable <= '1' when 
+    (p1_set_cp='1' and p1_set_cp0='0') or   -- mtc1..3
+    (p1_get_cp='1' and p1_get_cp0='0') or   -- mfc1..3
+    ((p1_get_cp0='1' or p1_set_cp0='1' or p1_rfe='1') 
+                     and cp0_status(1)='0') -- COP0 user mode
+    else '0';
+    
 --##############################################################################
 -- Pipeline registers & pipeline control logic
 
@@ -999,55 +1027,78 @@ with p1_we_control select data_wr(31 downto 24) <=
 
 
 --##############################################################################
--- CP0 (what little is implemented of it)
+-- CP0 and exception processing
 
+cp0_registers:
 process(clk)
 begin
     if clk'event and clk='1' then
         if reset='1' then
-            -- "10" => mode=kernel; ints=disabled
-            cp0_status <= "10";
+            -- KU/IE="10"  ==>  mode=kernel; ints=disabled
+            cp0_status <= "000010";  -- bits (KUo/IEo & KUp/IEp) reset to zero
             cp0_cache_control <= "00";
             cp0_cause_exc_code <= "00000";
             cp0_cause_bd <= '0';
         else
-            -- no need to check for stall cycles when loading these
-            if p1_set_cp0='1' then
-                -- NOTE: in MTCx, the source register is Rt
-                -- FIXME check for CP0 reg index
-                cp0_status <= p1_rt(cp0_status'high downto 0);
-                cp0_cache_control <= p1_rt(17 downto 16);
-            end if;
-            if p1_exception='1' and pipeline_stalled='0' then
-                cp0_epc <= p0_pc_restart;
+            if pipeline_stalled='0' then
+                if p1_exception='1' then
+                    -- Exception: do all that needs to be done right here
                 
-                if p1_unknown_opcode='1' then
-                    cp0_cause_exc_code <= "01010"; -- bad opcode
-                else
-                    if p1_ir_fn(0)='0' then
-                        cp0_cause_exc_code <= "01000"; -- syscall
+                    -- Save PC in EPC register...
+                    cp0_epc <= p0_pc_restart;
+                    -- ... set KU flag to Kernel mode ...
+                    cp0_status(1) <= '1';
+                    -- ... and 'push' old KU/IE flag values 
+                    cp0_status(5 downto 4) <= cp0_status(3 downto 2);
+                    cp0_status(3 downto 2) <= cp0_status(1 downto 0);
+                    
+                    -- Set the 'exception cause' code... 
+                    if p1_unknown_opcode='1' then
+                        cp0_cause_exc_code <= "01010"; -- bad opcode ('reserved')
+                    elsif p1_cp_unavailable='1' then
+                        -- this triggers for mtc0/mfc0 in user mode too
+                        cp0_cause_exc_code <= "01011"; -- CP* unavailable 
                     else
-                        cp0_cause_exc_code <= "01001"; -- break
+                        if p1_ir_fn(0)='0' then
+                            cp0_cause_exc_code <= "01000"; -- syscall
+                        else
+                            cp0_cause_exc_code <= "01001"; -- break
+                        end if;
                     end if;
-                end if;
+                    -- ... and the BD flag for exceptions in delay slots
+                    cp0_cause_bd <= cp0_in_delay_slot;
                 
-                cp0_cause_bd <= cp0_in_delay_slot;
+                -- FIXME RFE missing
+                elsif p1_rfe='1' and cp0_status(1)='1' then
+                    -- RFE: restore ('pop') the KU/IE flag values
+                    
+                    cp0_status(3 downto 2) <= cp0_status(5 downto 4);
+                    cp0_status(1 downto 0) <= cp0_status(3 downto 2);
+                    
+                elsif p1_set_cp0='1' and cp0_status(1)='1' then
+                    -- MTC0: load CP0[xx] with Rt
+                
+                    -- NOTE: in MTCx, the source register is Rt
+                    -- FIXME this works because only SR is writeable; when 
+                    -- CP0[13].IP1-0 are implemented, check for CP0 reg index.
+                    cp0_status <= p1_rt(cp0_status'high downto 0);
+                    cp0_cache_control <= p1_rt(17 downto 16);
+                end if;
             end if;
         end if;
     end if;
-end process;
+end process cp0_registers;
 
 cache_enable <= cp0_cache_control(17);
 ic_invalidate <= cp0_cache_control(16);
 
 cp0_cause_ce <= "00"; -- FIXME CP* traps merged with unimplemented opcode traps
 cp0_cause <= cp0_cause_bd & '0' & cp0_cause_ce & 
-             X"00000" & "000" & 
-             cp0_cause_exc_code;
+             X"00000" & '0' & cp0_cause_exc_code & "00";
 
 -- FIXME the mux should mask to zero for any unused reg index
 with p1_c0_rs_num select cp0_reg_read <=
-    X"0000000" & "00" & cp0_status  when "01100",
+    X"000000" & "00" & cp0_status   when "01100",
     cp0_cause                       when "01101",
     cp0_epc & "00"                  when others;
 
@@ -1058,7 +1109,6 @@ end architecture rtl;
 -- Implementation notes
 --------------------------------------------------------------------------------
 -- @note1 : 
---
 -- This is the meaning of these two signals:
 -- pipeline_stalled & stalled_interlock =>
 --  "00" => normal state
@@ -1076,4 +1126,11 @@ end architecture rtl;
 -- @note2:
 -- The logic that checks register indices for data hazards is 'commented out'
 -- because it has not been tested yet.
+--
+-- @note3:
+-- CP0 instructions (mtc0, mfc0 and rfe) are only partially decoded.
+-- This is possible because no other VALID MIPS* opcode shares the decoded 
+-- part; that is, we're not going to misdecode a MIPS32 opcode, but we MIGHT
+-- mistake a bad opcode for a COP0; we'll live with that for the time being.
+--
 --------------------------------------------------------------------------------
