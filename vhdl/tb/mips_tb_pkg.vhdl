@@ -61,6 +61,7 @@ type t_log_info is record
     cp0_cache_control :     std_logic_vector(1 downto 0);
     prev_status :           t_word;
     p1_set_cp0 :            std_logic;
+    p1_rfe :                std_logic;
     pc_mtc0 :               t_word;
     
     pc_m :                  t_pc_queue;
@@ -260,7 +261,7 @@ begin
         -- CP0, register SR
         
         -- If SR changed by mtc0 instruction, get the mtc0 address
-        if info.p1_set_cp0='1' and info.cp0_status(1)='1' then
+        if (info.p1_set_cp0='1' or info.p1_rfe='1') and info.cp0_status(1)='1' then
             info.pc_mtc0 <= info.pc_m(k-1);
         end if;
         
@@ -354,6 +355,7 @@ begin
     init_signal_spy("/"&entity_name&"/cp0_epc", signal_name&".cp0_epc", 0, -1);
     init_signal_spy("/"&entity_name&"/cp0_status", signal_name&".cp0_status", 0, -1);
     init_signal_spy("/"&entity_name&"/p1_set_cp0", signal_name&".p1_set_cp0", 0, -1);
+    init_signal_spy("/"&entity_name&"/p1_rfe", signal_name&".p1_rfe", 0, -1);
     init_signal_spy("/"&entity_name&"/cp0_cache_control", signal_name&".cp0_cache_control", 0, -1);
     init_signal_spy("/"&entity_name&"/data_rd_vma", signal_name&".data_rd_vma", 0, -1);
     init_signal_spy("/"&entity_name&"/p1_rbank_we", signal_name&".p1_rbank_we", 0, -1);

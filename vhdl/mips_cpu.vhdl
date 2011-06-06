@@ -213,6 +213,7 @@ signal reset_done :         std_logic;
 
 -- CP0[12]: status register, KUo/IEo & KUP/IEp & KU/IE  bits
 signal cp0_status :         std_logic_vector(5 downto 0);
+signal cp0_sr_ku_reg :      std_logic;
 -- CP0[12]: status register, cache control
 signal cp0_cache_control :  std_logic_vector(17 downto 16);
 -- Output of CP0 register bank (only a few regs are implemented)
@@ -793,7 +794,9 @@ p1_cp_unavailable <= '1' when
     (p1_set_cp='1' and p1_set_cp0='0') or   -- mtc1..3
     (p1_get_cp='1' and p1_get_cp0='0') or   -- mfc1..3
     ((p1_get_cp0='1' or p1_set_cp0='1' or p1_rfe='1') 
-                     and cp0_status(1)='0') -- COP0 user mode
+                     and cp0_sr_ku_reg='0') 
+                     --and cp0_status(1)='0') -- COP0 user mode
+    -- FIXME CP1..3 logic missing
     else '0';
     
 --##############################################################################
@@ -1036,6 +1039,7 @@ begin
         if reset='1' then
             -- KU/IE="10"  ==>  mode=kernel; ints=disabled
             cp0_status <= "000010";  -- bits (KUo/IEo & KUp/IEp) reset to zero
+            cp0_sr_ku_reg <= '1'; -- delayed KU flag
             cp0_cache_control <= "00";
             cp0_cause_exc_code <= "00000";
             cp0_cause_bd <= '0';
@@ -1068,7 +1072,6 @@ begin
                     -- ... and the BD flag for exceptions in delay slots
                     cp0_cause_bd <= cp0_in_delay_slot;
                 
-                -- FIXME RFE missing
                 elsif p1_rfe='1' and cp0_status(1)='1' then
                     -- RFE: restore ('pop') the KU/IE flag values
                     
@@ -1084,6 +1087,9 @@ begin
                     cp0_status <= p1_rt(cp0_status'high downto 0);
                     cp0_cache_control <= p1_rt(17 downto 16);
                 end if;
+            end if;
+            if stall_pipeline='0' then
+                cp0_sr_ku_reg <= cp0_status(1);
             end if;
         end if;
     end if;
