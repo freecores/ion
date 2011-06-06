@@ -94,6 +94,7 @@
 -- The cache tables has been given startup values; these are only for simulation
 -- convenience and have no effect on the cache behaviour (and obviuosly they
 -- are only used after FPGA config, not after reset). 
+--
 --------------------------------------------------------------------------------
 -- This module interfaces the CPU to the following:
 --
@@ -401,6 +402,8 @@ signal data_miss :          std_logic;
 signal data_miss_cached :   std_logic;
 -- Data miss logic, portion used with cach disabled
 signal data_miss_uncached : std_logic;
+-- Active when LW follows right after a SW (see caveats in code below)
+signal data_miss_by_invalidation : std_logic;
 -- Active when the data tag comparison result is valid (1 cycle after rd_vma)
 -- Note: no relation to byte_we. 
 signal data_tag_match_valid:std_logic;
@@ -505,7 +508,7 @@ begin
                 when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
                 when MT_IO_SYNC     => ns <= data_write_io_0;
                 -- FIXME ignore write to undecoded area (clear pending flag)
-                when others         => ns <= ps;
+                when others         => ns <= data_ignore_write;
                 end case;
     
             elsif read_pending='1' then
@@ -543,7 +546,7 @@ begin
                     when MT_SRAM_16B    => ns <= data_writethrough_sram_0a;
                     when MT_IO_SYNC     => ns <= data_write_io_0;
                     -- FIXME ignore write to undecoded area (clear pending flag)
-                    when others         => ns <= ps;
+                    when others         => ns <= data_ignore_write;
                     end case;
     
                 elsif read_pending='1' then
@@ -1135,12 +1138,26 @@ end process data_tag_comparison_validation;
 -- The D-Cache misses when the tag in the cache is not the tag we want or 
 -- it is not valid.
 
+-- When we write to a line right before we read from it, we have a RAW data 
+-- hazard: the data cache will (usually) hit because the tag match will be done
+-- before the writethrough. To prevent this, we do an additional tag match.
+data_miss_by_invalidation <= '1' when 
+    data_tag_match_valid='1' and update_data_tag='1' --and
+    -- FIXME skip additional tag match, it's too slow. Do later as registered
+    -- match and update state machine.
+    -- This means that a sequence SW + LW will ALWAYS produce a data miss,
+    -- even if the written lines are different. This needs fixing.
+--    data_tag_reg=data_tag
+    else '0';
+
 -- When cache is disabled, assert 'miss' after vma 
 data_miss_uncached <= data_tag_match_valid and not ic_invalidate;
 -- When cache is enabled, assert 'miss' after the comparison is done.
 data_tags_match <= '1' when (data_tag_reg = data_cache_tag) else '0';
-data_miss_cached <= '1' when data_tag_match_valid='1' and data_tags_match='0'
-                    else '0';
+data_miss_cached <= '1' when 
+    (data_tag_match_valid='1' and data_tags_match='0') or
+    data_miss_by_invalidation='1'
+    else '0';
 
 -- Select the proper code_miss signal
 data_miss <= data_miss_uncached when cache_enable='0' else data_miss_cached;
@@ -1271,7 +1288,7 @@ with ps select data_refill_data <=
 -- SRAM address bus (except for LSB) comes from cpu code or data addr registers
 
 sram_address(sram_address'high downto 2) <=
-    data_rd_addr_reg(sram_address'high downto 2)
+    data_refill_addr(sram_address'high downto 2)
         when   (ps=data_refill_sram_0  or ps=data_refill_sram_1 or
                 ps=data_refill_sram8_0 or ps=data_refill_sram8_1 or
                 ps=data_refill_sram8_2 or ps=data_refill_sram8_3) else
