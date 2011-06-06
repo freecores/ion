@@ -1,8 +1,8 @@
 This file contains instructions and notes about the Ion CPU core project.
 The core structure is briefly explained in section 2. The rest of this doc is 
 mostly usage instructions for the test samples and custom utilities.
-In its present state it' more a reminder to myself than a proper explaination of
-the system.
+In its present state it's more a reminder to myself than a proper explaination 
+of the system.
 
 Last modified: Apr/04/2011
 
@@ -36,65 +36,71 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     2.- Catch all undefined opcodes (and trigger exception).
     3.- Operate in kernel/user mode as per the architecture definition.
     4.- Handle exceptions in a manner compatible to MIPS-I standard.
-    5.- Implement as much of CP0 as necessary for the above goals.
-    6.- Be no bigger than Plasma in a Spartan-3 or Cyclone-2 device, and
+    5.- Code cache and data cache, even if not standard.
+        No MMU and no TLB, and no cache-related instructions.
+    6.- Implement as much of CP0 as necessary for the above goals.
+    7.- Interface to external SRAM (or FLASH) on 8- and 16-bit data bus.
+    8.- Be no bigger than Plasma in a Spartan-3 or Cyclone-2 device, and
         no slower -- Plasma is used as a reference in many ways.
         Speed measured in raw clock frequency for the time being.
         (I.e. don't not consider stalls, interlocks, etc. yet)
-    7.- Interlock behavior of MUL/DIV and L* compatible to toolchain.
+    9.- Interlock behavior of MUL/DIV and L* compatible to toolchain.
         That is, interlock loads instead of relying on a delay slot.
 
     Unaligned load/stores are excluded not because of patent concerns (the
     patents already expired) but because they're not essential for a first
     version of the core. The same goes for all other exclusions.
 
+    As of rev. 154 all the 1st block goals have been accomplished (but not very
+    heavily tested; many bugs remain, probably).
 
+    
     For a second iteration I plan on the following:
 
     1.- Proper interlocking of load cycles (with no wasted cycles).
     2.- External interrupt support.
-    3.- Code cache and data cache, even if not standard.
-        No MMU and no TLB, and no cache-related instructions.
-    4.- Interface to external SRAM (or FLASH) on 8- and 16-bit data bus.
+    3.- Trap handlers (instruction emulation) for unaligned load and store 
+        instructions.
+    4.- Trap handlers (instruction emulation) for the most usual MIPS32 
+        instructions.    
 
-
-    Many of the above goals have already been accomplished.
+    None of these things have been done.
 
 
 
 1.2.- Development status
 
-    In its present state, the CPU can pass a basic opcode test and can execute
-    some basic MIPS-I code compiled with standard gcc tools (specifically, it
-    can run an 'Adventure' demo and a tiny 'hello world' program, see 
-    section 6).
-    'Basic' means that the core has a number of limitations that prevent it from
-    running just any code -- mostly unimplemented instructions and skeletal
-    memory interface.
+    The CPU is already able to execute almost any MIPS-I code (excluding some
+    unimplemented instructions such as cache control). 
+    It can pass a basic opcode test and can execute some basic applications 
+    compiled with standard gcc tools (specifically, it can run an 'Adventure' 
+    demo and a tiny 'hello world' program, see section 6).
     
-    Besides, the core can already access external static memory (SRAM or FLASH)
-    on 8-bit and/or 16 bit buses. 
-    My main development target is a DE-1 board from Terasic (Cyclone-2) which
-    happens to have that kind of memory on it.
+    The most important limitations are the very basic memory interface, with
+    no support for SDRAM, and the absence of MIPS32 trap handlers (see xxx).
+    
+    The memory controller can already access external static memory (SRAM or 
+    FLASH) on 8-bit and/or 16 bit buses. Still does not support SDRAM or 
+    static RAM in other bus widths.
+    My main development target is a DE-1 board from Terasic (Cyclone-2) and I 
+    have focused in the kind of memory it has.
+    
     Wait states can be configured at synthesis, see section 2.6 below.
     Code sample 'memtest' takes advantage of this to do a basic test of the
     external SRAM, and code sample 'Adventure' uses both Flash and SRAM.
     
 
-    The opcode test is included in '/src/opcodes/opcodes.s' (see section 6).
+    The code samples can be found in the /src directory (see section 6).
 
 
     This is the state of the CPU at this time:
 
     ### MIPS-I things not implemented
-        - Kernel/user status.
-        - RTE instruction -- as of now, returns from traps with JR.
-        - Most of the CP0 registers and of course all of the CP1.
-        - External interrupts.
-        - Caches (there's an empty 'stub' cache and an unfinished real cache)
+        1.- External interrupts.
+        2.- Some basic means of debugging (besides the trap instruction).
 
     ### Things implemented but not fully tested.
-        - Memory pause input -- work in progress along with the cache module.
+        1.- Rte instruction.
 
     ### Things with provisional implementation
 
@@ -109,24 +115,33 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
             The interlock logic needs a stronger test bench anyway.
         2.- Documentation is too sparse and source code is barely commented.
             This is critical and I plan to fix it ASAP.
+        3.- The D-Cache handles RAW hazards in a very inefficient way.
+            Data refills in a SW+LW sequence should only be triggered when the
+            SW invalidates the same line the LW is loading. Instead, the current
+            cache triggers the data refill always (for a SW+LW sequence, that 
+            is). 
+            This performance drag has to be fixed without ruining the clock rate
+            (that's the catch).
 
 
     ### Performance
     
     In my main test system, a Cyclone-2 grade -7, I'm quite sure that the core
     with caches and with mul/div and all other necessary functionality, plus 
-    a barebones UART, will be below 2500 LEs, running at least at 50 MHz (with
-    'balanced optimization' on Quartus-II).
-    
+    a barebones UART, will be below 2500 LEs + 18 BRAMs, running at least at 
+    50 MHz (with 'balanced optimization' on Quartus-II).
     
     As soon as the core is in a stable state I will include a few synthesis
     performance numbers for common configurations.
 
+    As soon as I can build a dhrystone benchmark I will post results (and commit
+    the code). The core needs a timer before I can do that.
 
 1.3.- Next steps
 
     * Implement efficient load interlock detection with no wasted cycles.
-    * Add a couple other code samples, including one with FP arithmetic.
+    * Do whatever it takes to use standard C library functions (see xxx).
+    * Add a couple of benchmarks, including one with FP arithmetic.
     * Modify the software simulator so it can boot uClinux.
     * Make a uClinux port suitable for a R3000 derivative, from BuildRoot.
 
@@ -137,6 +152,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 2.- CPU description
 ================================================================================
 
+    This section is about the 'core' cpu, excluding the cache.
 
 2.0.- Some general features
 
@@ -282,17 +298,14 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     Memory wait cycles have already been implemented and tested with a 'stub'
     cache (module mips_cache_stub) and the first version of the real cache
     (module mips_cache.vhdl). The 'stub cache' is actually just an interface
-    to external 8/16-bit wide memory that has only been barely tested on real 
-    hardware. This stub cache is described in section 2.7 below while the real
+    to external 8/16-bit wide memory, described in section 2.7 below. The real
     cache is descibed in section 2.8.
-    The memory wait state logic is a work in progress and might change as 
-    development on the cache module proceeds.
 
     In short, the 'mem_wait' input will unconditionally stall all pipeline
     stages as long as it is active. It is meant to be used by the cache at cache 
     refills.
 
-    Again, the current implementation of the wait input and its logic is going
+    The current implementation of the wait input and its logic is going
     to change. Eventually it will be described here.
 
     
@@ -301,7 +314,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 2.2 Pipeline
 
     Here is where I would explain the structure of the cpu in detail; these 
-    brief comments will have to wait until I write some real documentation.
+    brief comments will have to suffice until I write some real documentation.
     
     This section could really use a diagram; since it can take me days to draw 
     one, that will have to wait for a further revision.
@@ -468,9 +481,9 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     
     The C toolchain needs to be set up for MIPS-I compliance in order to build
     object code compatible with this scheme.
-    But all succeeding versions of the MIPS architecture, including the MIPS-32
-    that this core aims to be compatible with in the future, implement a 
-    different scheme instead, 'load interlock' ([1], pag. 28).
+    But all succeeding versions of the MIPS architecture implement a 
+    different scheme instead, 'load interlock' ([1], pag. 28). You often see
+    this behavior in code generated by gcc, even when using the -mips1 flag.
     In short, it pays to implement load interlocks so this core does, but the
     feature should be optional through a generic.
     
@@ -533,12 +546,16 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 2.4 Exceptions
 
     The only exceptions supported so far are software exceptions, and of those 
-    only the instructions BREAK and SYSCALL and the unimplemented opcode trap.
+    only the instructions BREAK and SYSCALL, the unimplemented opcode trap and
+    the user access to CP0 trap.
+    Memory provileges are not and will not be implemented. Hardware/software 
+    interrupts are still unimplemented too.
     
-    Both do a limited version of the regular MIPS exception behavior.
-    They save their own address to EPC, abort the following instruction, and
-    jump to the exception vector 0x03c. All as per the specs except the vector
+    Exceptions are meant to work as in the R3000 CPUs except for the vector 
     address.
+    They save their own address to EPC, update the SR, abort the following 
+    instruction, and jump to the exception vector 0x0180. All as per the specs 
+    except the vector address (we only use one).
         
     The following instruction is aborted even if it is a load or a jump, and 
     traps work as specified even from a delay slot -- in that case, the address
@@ -546,10 +563,11 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     instruction's as explained in [1], pag. 64.
     
     Plasma used to save in epc the address of the instruction after break or 
-    syscall. This core will use the standard MIPS way instead.
+    syscall, and used an unstandard vector address (0x03c). This core will use 
+    the standard R3000 way instead.
     
     Note that the epc register is not used by any instruction other than mfc0;
-    ERET is not implemented yet, because privilege levels aren't either.
+    RTE is implemented and works as per R3000 specs.
 
 
 2.5.- Multiplier
@@ -591,16 +609,27 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         d.- Whether it is cacheable or not
         
     In the present implementation the memory map can't be modified at run time.
-    
+        
     The cache module uses 'decode_address_mips1' to determine what to do for 
     each cache refill -- the refill state mechine is different for each kind of 
     memory, see section 2.7. 
     
     Note that the cache stub implements only points a, b and c.
 
+    (NOTE: the cache module includes the memory controller, which is what 
+    actually uses all this information. The I- and D-Cache logic don't care
+    about memory types or mappings).
+
 
 2.7.- 'Stub' cache
 
+    IMPORTANT: in all revisions later than 106, the cache stub module is no 
+    longer supported -- it is incompatible with changes made to the rest of the
+    project. 
+    It remains present for clarity only.
+    This expplaination applies only to the relevant (<=106) revisions.
+
+    
     As of revision 53, there is a first synthesizable version of the cache, a 
     'stub' with almost no functionality meant to bring the system up.
     The cache in its present state (rev. 53) is just an interface to external
@@ -856,27 +885,27 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     As of revision 114, the project already includes a real cache module, still
     unfinished. Both the simulation template and the synthesis template still
     use the stub cache by default, so if you want to test the real cache you 
-    have to modify the templated manually.
+    have to modify the templated manually. 
+    Use always the latest revision! the cache module is still a work in 
+    progress (last bug fix in rev. 153).
     
-    Only the I-Cache is implemented; the D-Cache still uses the stub logic from
-    the mips_cache_stub module. Besides, SDRAM is not supported yet. And there
-    are a number of loose ends in the implementation still to be solved. For
-    example, the cache size is supposed to be parametrizable through generics; 
-    but though the generics are already there, the actual code does not use them
-    and uses hardcoded constants instead. There's many things like this
-    still unfinished.
+    Both the I- and the D-Cache are implemented. But the parametrization 
+    generics are still mostly unused, with many values hardcoded. And SDRAM is 
+    not supported yet. Besides, there are some loose ends in the implementation 
+    still to be solved.
     
     As time permits I will add timing diagrams to this section. For now, I will
     only say that the timing diagrams will be nearly identical to those of the
     stub cache with only one important difference: In the stub cache, each 
     refill operation only reads a single word from memory, whereas in the real 
-    cache each refill reads 4 words in reverse order (i.e. 3, 2, 1, 0 LSB 
-    address bits).
+    cache each refill reads 4 words.
+    
+    FIXME: add at least one cache timing diagram.
 
 
 2.8.1.- Cache initialization and control
 
-    Bits 17 and 16 of the SR are NOT used for their standard MIPS-I purpose.
+    Bits 17 and 16 of the SR are NOT used for their standard R3000 purpose.
     Instead they are used as explained below:
     
     - Bit 17: Cache enable              [reset value = 0]
@@ -885,12 +914,17 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
         cache refill (even sucessive accesses to the same line).
         When '1', caches are enabled and work as usual.
     
-    - Bit 16: I-Cache line invalidate   [reset value = 0]
+    - Bit 16: I- and D-Cache line invalidate   [reset value = 0]
     
         When bits 17:16='01', writing word X.X.X.N to ANY address will 
         invalidate I-Cache line N (N is an 8-bit word and X is an 8-bit 
         don't care).
         Besides, the actual write will be performed too.
+        
+        When bits 17:16='01', reading from any address will cause the 
+        corresponding data cache line to be invalidated; the read will not be
+        actually performed and the read value is undefined.
+        
         When bit 16 is '0', the cache will work as usual.
         When bits 17:16='11' cache behavior is UNDETERMINED.
 
@@ -930,14 +964,15 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     state.
 
     There are a few simulation test bench templates in the /src directory, which 
-    are used by all the code samples (and there's just two code samples in this 
-    release of the project...). 
+    are used by all the code samples. 
     The only one actually useful is '/src/mips_tb2_template.vhdl'. The others
     are remnants of previous versions that will be removed ASAP.
     
     The template in file '/src/mips_tb2_template.vhdl' is filled in with all 
-    the necesary data (mostly memory init. strings) from the
+    the necesary data (mostly memory initialization strings) from the
     code sample object file(s) and then written to '/vhdl/tb/mips_tb2.vhdl'.
+    This is done by a python script (/src/bin2hdl.py) which is invoked from
+    the makefiles.
     The idea is that these tb templates are an execution harness to be shared by 
     all test programs. See the template comments for a quick explaination of
     their purpose (and the reason there is more than one template).
@@ -945,6 +980,11 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     The test bench templates provided are only good to test instruction
     execution and basic core functionality. As the project moves forward and
     new features are added (e.g. caches) I will add more test bench templates.
+    While the test benches and sample code are good enough to catch MOST errors
+    in the full system (i.e. cache included) they don't help with diagnostic;
+    once you know there's an error, and the approximate address where it's
+    triggered (approximate because of the cache) you have to dig into the 
+    simulation waveforms to find it. It's easier than it seems.
 
 
 3.1.- Running the simulation
@@ -998,6 +1038,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     Be aware that the simulation timeout is arbitrarily fixed in the makefile. 
     This time may or may not be enough to execute the program. Change it if
     necessary.
+    
     I should include some means to check for program termination (perhaps a
     debug register written to from boot.s after returning from main, or vhdl
     debug code that catches 1-instruction closed loops).
@@ -1006,21 +1047,22 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 3.2.- Simulation file logging
 
-    The test bench will log any of the following events:
+    The simulation test bench will log any of the following events:
 
     - Changes in the register bank.
     - Changes in registers HI and LO (implemented even if mul/div is not).
-    - Changes in register EPC (implemented even though it is unused).
+    - Changes in registers EPC and SR.
     - Data loads (any resulting register change is logged separately).
     - Data stores.
 
     Note that changes in other internal registers, including PC, are not logged.
     This means that for example a long chain of NOPs, or MOVEs that don't change
-    register values, will not be seen in the log file.
+    register values, will not be seen in the log file. This is on purpose.
 
-    Events are logged with the current value of the PC; this value usually
-    points to the instruction following the instruction that triggered the
-    event, due to pipelining. This holds true even for load instructions.
+    Events are logged with the address of the instruction that triggered 
+    the change. This holds true even for load instructions.
+    Note that early versions of the project logged the address of the 
+    preceding instruction -- it was confuse and I have fixed it.
 
     The simulation log file is stored by default in modelsim's working directory
     (see above). I don't provide any automated script to do the comparison, you
@@ -1028,6 +1070,10 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 
 3.2.1.- Log file format
+
+    FIXME: the log examples below are from an early version of the logger that
+    did not use the instruction address but the previous address. They are very
+    misleading and should be updated.
 
     There is a text line for each of the following events:
 
@@ -1107,7 +1153,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
                 (00000298) [03]=20000000
                 ...
 
-    (NOTE: this example taken from revision 1, yours may vary)
+    (NOTE: this example taken from revision 1, yours will probably vary)
 
     The read cycle at pc=0x288 modifies register 0x05; that's why there are two
     lines with the same pc value.
@@ -1159,7 +1205,7 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     The test bench needs to access those signals in order to detect changes in
     the internal cpu state that should be logged. That is, it really needs to
-    look at those signals if it is to be of any use.
+    look at those signals if it is to be of any use, this is no whim of mine.
 
     If you are using any other simulation tool, look for an alternative method
     to get those internal signals or just add them to the core interface. I
@@ -1169,6 +1215,11 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     I guess this is why Mentor people took the trouble to write SygnalSpy.
 
     I plan to move to Symphony EDA eventually, so I'll have to fix this.
+    
+    Using GHDL would be an option, except because it only supports vhdl. The
+    project will use a SDRAM model in verilog for which I could not find a
+    vhdl replacement. If the project is to be ported to GHDL (a very desirable 
+    goal) this will have to be worked around.
 
 
 
@@ -1178,9 +1229,10 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 4.1.- Pre-generated demo
 
-    The project includes 3 synthesizable code samples, a 'Hello world' demo
-    and a memory tester. Only the 'hello' demo is included in pre-generated 
-    form, the others have to be built using the included makefiles.
+    The project includes a few synthesizable code samples, including a 
+    'Hello world' demo and a memory tester. Only the 'hello' demo is included 
+    in pre-generated form, the others have to be built using the included 
+    makefiles -- assuming you have a mips toolchain.
 
     This is just for convenience, so that you can launch some demo on hardware
     without installing the C toolchain.
@@ -1200,34 +1252,40 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     I assume you are familiar with Altera tools but anyway this is how to set up
     a project using Quartus II:
 
-        1.- Create new project with the new project wizard
-            Top entity should be c2sb_demo
-            Suggested path is /syn/altera/<project name>
-        2.- Set target device as EP2C20F484C7
-            This choice determines speed grade and chip package
-        3.- 'Next' your way out of the new project wizard
-        4.- Add to the project all the vhdl files in /vhdl and /vhdl/demo
-            Select file c2sb_demo.vhdl as top
-        5.- Import pin constraints file (assignments->import assignments)
-        6.- Create a clock constraint for signal clk (52 MHz or some other
+        1.- Create new project with the new project wizard.
+            Top entity should be c2sb_demo.
+            Suggested path is /syn/altera/<project name>.
+        2.- Set target device as EP2C20F484C7.
+            This choice determines speed grade and chip package.
+        3.- 'Next' your way out of the new project wizard.
+        4.- Add to the project all the vhdl files in /vhdl and /vhdl/demo.
+            Select file c2sb_demo.vhdl as top.
+        5.- Import pin constraints file (assignments->import assignments).
+        6.- Create a clock constraint for signal clk (51 MHz or some other
             suitable speed which gives us some minimal slack).
-        7.- In the device settings window, click "Device and pin options..."
-        8.- Select tab "Dual-Purpose pins"
-        9.- Double-click on nCEO value column and select "use as regular I/O"
+        7.- In the device settings window, click "Device and pin options...".
+        8.- Select tab "Dual-Purpose pins".
+        9.- Double-click on nCEO value column and select "use as regular I/O".
             IMPORTANT: otherwise the synthesis will fail; we need to use a FPGA
             pin that happens to be dual-purpose (programming and regular).
-        10.-Save the project and synthesize
-        11.-Make sure the clock constraint is met (timing analyzer report)
-        12.-If you have a terminal hooked to the serial port (19200/8/N/1) you
+        10.-Select 'balanced' optimization.
+        11.-Save the project and synthesize.
+        12.-Make sure the clock constraint is met (timing analyzer report).
+            There is a random element to the synthesis process, as you know,
+            so it is possible that you need to repeat it if the first trial does
+            not pass the constraints.
+        13.- Program the FPGA from Quartus-2
+        14.-If you have a terminal hooked to the serial port (19200/8/N/1) you
             should see a welcome message after depressing the reset button.
+            (by default this is pusbutton 2).
 
     In case you need to troubleshoot, my synthesis of the default demo is
     usually like this:
 
         - Selected optimization: balanced
         - All other options: default
-        - <2250 LEs plus 27 M4K blocks if you use the real cache
-        - Clock constraint met but not by much (~53 MHz)
+        - <2400 LEs plus a lot of M4K blocks if you use the cache and code BRAM
+        - Clock constraint met but not by much (~51+ MHz)
         - <60 warnings, mostly harmless (ugliest: unused pins, undeclared clock)
 
     Note that none of the on-board goodies are used in the demo except as noted
@@ -1244,12 +1302,15 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
 4.2.- Porting to other dev boards
 
-    I will only deal here with the 'hello' demo.
+    I will only deal here with the 'hello' demo, the process is the same
+    for all other samples that don't involve the flash.
 
+    
     The 'hello' demo should be easily portable to any board which has all of 
     this:
 
-        - An FPGA capable enough (the demo uses internal memory only)
+        - An FPGA capable enough (the demo uses internal memory for code)
+        - At least 4KB of 16-bit wide SRAM
         - A reset pin (possibly a pushbutton)
         - A clock input (uart modules assume 50MHz, see below)
         - RXD and TXD UART pins, plus a connector, header or whatever
@@ -1272,21 +1333,17 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     to match your board setup.
 
     All the code in this project is vendor agnostic (or should be, I have only
-    tried it on Quartus and ISE). Specifically, it does not instance memory
+    tried it on Quartus and ISE). Specifically, it does not instantiate memory
     blocks (relying instead on memory inference) or clock managers or buffers.
     This has its drawbacks but is an stated goal of the project -- in the long
     run it pays, I think.
 
-
-    The memory test demo, on the other hand, uses the external static RAM on
-    the DE-1 board. Porting it involves only adapting the memory interface 
-    signals and should be quite straightforward. You're on your own, though.
      
 4.3 'Adventure' demo
 
-    There is a second demo targeting the same hardware as the hello demo above:
+    There is another demo targeting the same hardware as the hello demo above:
     a port of 'Adventure'. The C source (included) has been slightly modified
-    to not use any library functions nor any fulesystem (instead uses a built-in
+    to not use any library functions nor any filesystem (instead uses a built-in
     constant string table).
     
     Build steps are the same as for the hello demo (the make target is 
@@ -1295,7 +1352,9 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
     Since the binary executable is too large to fit internal BRAM, it has to be 
     executed from the DE-1 onboard flash. You need to write file adventure.bin
     to the start of the FLASH using the 'Control Panel' tool that came with your
-    DE-1 board. That's the only salient difference.
+    DE-1 board. That's the only salient difference. That and the amount of SRAM;
+    The 512KB present on the DE-1 are enough but I don't remember right now
+    what is the minimum, please look at the map file.
     
     The game will offer you an auto-walkthrough option. Answer 'y' and it will
     play itself for about 250 moves, leaving you at an intermediate stage of 
@@ -1331,7 +1390,8 @@ Send bug reports or comments to ja_rd[at]hotmail[dot]com
 
     The simulator can be compiled for compatibility to Plasma or to a more
     standard mips1. This affects the simulated memory map and the trap vectors
-    only, as of rev. 70. Note that mips1 simulation is far from complete yet.
+    only, as of rev. 70. Note that mips1 simulation is far from complete yet,
+    and the caches are not simulated at all.
 
     Upon startup, the simulator loads a number of binary files as requested in 
     the command line:
