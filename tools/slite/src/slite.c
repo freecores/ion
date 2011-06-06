@@ -43,6 +43,8 @@
 #include <ctype.h>
 #include <assert.h>
 
+#define R3000_ID (0x00000200)
+
 /** Set to !=0 to disable file logging (much faster simulation) */
 #define FILE_LOGGING_DISABLED (0)
 /** Define to enable cache simulation (unimplemented) */
@@ -65,7 +67,7 @@ typedef struct s_block {
 } t_block;
 
 #define NUM_MEM_BLOCKS      (4)
-#define NUM_MEM_MAPS        (3)
+#define NUM_MEM_MAPS        (4)
 
 /** Definition of a memory map */
 /* FIXME i/o addresses missing, hardcoded */
@@ -95,9 +97,10 @@ typedef struct s_map {
     Make sure the blocks don't overlap or the scheme will fail.
 */
 
-#define MAP_DEFAULT (0)
-#define MAP_UCLINUX (1)
-#define MAP_SMALL   (2)
+#define MAP_DEFAULT         (0)
+#define MAP_UCLINUX_BRAM    (1)  /* debug only */
+#define MAP_SMALL           (2)
+#define MAP_UCLINUX         (3)
 
 t_map memory_maps[NUM_MEM_MAPS] = {
     {/* Experimental memory map (default) */
@@ -112,7 +115,7 @@ t_map memory_maps[NUM_MEM_MAPS] = {
         }
     },
 
-    {/* uClinux memory map */
+    {/* uClinux memory map with bootstrap BRAM, debug only, to be removed */
         {/* Bootstrap BRAM, read only */
         {VECTOR_RESET,  0x00001000, 0xf8000000, 1, NULL, "Boot BRAM"},
         /* main external ram block  */
@@ -132,6 +135,20 @@ t_map memory_maps[NUM_MEM_MAPS] = {
         {0x80000000,    0x00001000, 0xf8000000, 0, NULL, "XRAM1"},
         /* external flash block */
         {0xb0000000,    0x00040000, 0xf8000000, 0, NULL, "Flash"},
+        }
+    },
+
+    {/* uClinux memory map with FLASH and XRAM */
+        {/* Flash mapped at two different addresses is actually meant to be
+            a single chip (note they have the same size). */
+         /* E.g. put the bootloader at 0xbfc00000 and the romfs at 0xb0020000;
+            chip offsets will be 0x0 and 0x20000. */
+         /* Don't forget there's no address translation here. */
+        {0xbfc00000,    0x00400000, 0xf8000000, 1, NULL, "Flash (bootloader)"},
+        {0xb0000000,    0x00400000, 0xf8000000, 1, NULL, "Flash (romfs)"},
+        /* main external ram block (kernal & user areas ) */
+        {0x80000000,    0x00200000, 0xf8000000, 0, NULL, "XRAM (kernel)"},
+        {0x00000000,    0x00400000, 0xf8000000, 0, NULL, "XRAM (user)"},
         }
     },
 };
@@ -274,7 +291,7 @@ typedef struct s_trace {
    int log_triggered;                     /**< !=0 if log has been triggered */
    uint32_t log_trigger_address;          /**< */
    int pr[32];                            /**< last value of register bank */
-   int hi, lo, epc;                       /**< last value of internal regs */
+   int hi, lo, epc, status;               /**< last value of internal regs */
 } t_trace;
 
 typedef struct s_state {
@@ -348,6 +365,7 @@ void log_read(t_state *s, int full_address, int word_value, int size, int log);
 void log_failed_assertions(t_state *s);
 uint32_t log_enabled(t_state *s);
 void trigger_log(t_state *s);
+void print_opcode_fields(uint32_t opcode);
 
 int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args);
 void usage(void);
@@ -878,7 +896,8 @@ void cycle(t_state *s, int show_mode){
         case 0x34:/*TEQ*/  break;
         case 0x36:/*TNE*/  break;
         default: printf("ERROR0(*0x%x~0x%x)\n", s->pc, opcode);
-           s->wakeup=1;
+            /* FIXME should trap unknown opcode */
+            s->wakeup=1;
         }
         break;
     case 0x01:/*REGIMM*/
@@ -910,26 +929,33 @@ void cycle(t_state *s, int show_mode){
     case 0x0e:/*XORI*/   r[rt]=r[rs]^imm;         break;
     case 0x0f:/*LUI*/    r[rt]=(imm<<16);         break;
     case 0x10:/*COP0*/
-        if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
-            switch(rd){
-                case 12: r[rt]=s->status & 0xffff; break;
-                case 13: r[rt]=s->cp0_cause; break;
-                case 14: r[rt]=s->epc; break;
-                case 15: r[rt]=0x00000200; break;
-                default:
-                    //printf("mfco [%02d]\n", rd);
-                    break;
+        if(s->status & 0x02){ /* kernel mode? */
+            if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
+                switch(rd){
+                    case 12: r[rt]=s->status & 0x0000003f; break;
+                    case 13: r[rt]=s->cp0_cause; break;
+                    case 14: r[rt]=s->epc; break;
+                    case 15: r[rt]=R3000_ID; break;
+                    default:
+                        //printf("mfco [%02d]\n", rd);
+                        break;
+                }
+            }
+            else{                         //move to CP0 (mtc0)
+                /* FIXME check CF= reg address */
+                s->status=r[rt] & 0x0003003f; /* mask W/O bits */
+                if(s->processId && (r[rt]&2)){
+                    s->userMode|=r[rt]&2;
+                    //printf("CpuStatus=%d %d %d\n", r[rt], s->status, s->userMode);
+                    //s->wakeup = 1;
+                    //printf("pc=0x%x\n", epc);
+                }
             }
         }
-        else{                         //move to CP0 (mtc0)
-            /* FIXME check CF= reg address */
-            s->status=r[rt];
-            if(s->processId && (r[rt]&2)){
-                s->userMode|=r[rt]&2;
-                //printf("CpuStatus=%d %d %d\n", r[rt], s->status, s->userMode);
-                //s->wakeup = 1;
-                //printf("pc=0x%x\n", epc);
-            }
+        else{
+            /* tried to execute mtc* or mfc* in user mode: trap */
+            trap_cause = 11; /* unavailable coprocessor */
+            s->exceptionId=1;
         }
         break;
     case 0x11:/*COP1*/  unimplemented(s,"COP1");
@@ -995,7 +1021,9 @@ void cycle(t_state *s, int show_mode){
         ;
         /* FIXME should trap unimplemented opcodes */
         /* FIXME newlib */
-        printf("ERROR2 address=0x%x opcode=0x%x\n", s->pc, opcode);
+        printf("ERROR2 address=0x%x opcode=0x%x -- ", epc, opcode);
+        print_opcode_fields(opcode);
+        printf("\n");
         s->wakeup=1;
     }
 
@@ -1016,10 +1044,15 @@ void cycle(t_state *s, int show_mode){
     /* Handle exceptions */
    if(s->exceptionId){
         r[rt] = rSave;
-        s->cp0_cause = (s->delay_slot & 0x1) << 31 | (trap_cause & 0x1f);
+        /* set cause field ... */
+        s->cp0_cause = (s->delay_slot & 0x1) << 31 | (trap_cause & 0x1f) << 2;
+        /* ...save previous KU/IE flags in SR... */
+        s->status = (s->status & 0xffffffc3) | ((s->status & 0x0f) << 2);
+        /* ...and raise KU(EXL) kernel mode flag */
+        s->status |= 0x02;
         /* adjust epc if we (i.e. the victim instruction) are in a delay slot */
         if(s->delay_slot){
-        epc = epc - 4;
+            epc = epc - 4;
         }
         s->epc = epc;
         s->pc_next = VECTOR_TRAP;
@@ -1041,6 +1074,25 @@ void cycle(t_state *s, int show_mode){
     delay_slot = ((lbranch==1) || branch || delay_slot);
     s->delay_slot = delay_slot;
 }
+
+/** Print opcode fields for easier debugging */
+void print_opcode_fields(uint32_t opcode){
+    uint32_t field;
+
+    field = (opcode >> 26)&0x3f;
+    printf("%02x:", field);
+    field = (opcode >> 21)&0x1f;
+    printf("%02x:", field);
+    field = (opcode >> 16)&0x1f;
+    printf("%02x:", field);
+    field = (opcode >> 11)&0x1f;
+    printf("%02x:", field);
+    field = (opcode >>  6)&0x1f;
+    printf("%02x:", field);
+    field = (opcode >>  0)&0x3f;
+    printf("%02x",  field);
+}
+
 
 /** Dump CPU state to console */
 void show_state(t_state *s){
@@ -1372,12 +1424,16 @@ void log_cycle(t_state *s){
         }
         s->t.hi = s->hi;
 
-        /* */
-        /* FIXME epc may change by direct write too, handle case */
+        /* Catch changes in EPC by direct write (mtc0) and by exception */
         if(s->epc != s->t.epc){
             fprintf(s->t.log, "(%08X) [EP]=%08X\n", log_pc, s->epc);
         }
         s->t.epc = s->epc;
+
+        if(s->status != s->t. status){
+            fprintf(s->t.log, "(%08X) [SR]=%08X\n", log_pc, s->status);
+        }
+        s->t.status = s->status;
     }
 }
 
@@ -1437,6 +1493,9 @@ void reset_cpu(t_state *s){
     s->pc = VECTOR_RESET;     /* reset start vector */
     s->delay_slot = 0;
     s->failed_assertions = 0; /* no failed assertions pending */
+    s->status = 0x02; /* kernel mode, interrupts disabled */
+    /* init trace struct to prevent spurious logs */
+    s->t.status = s->status;
 }
 
 void unimplemented(t_state *s, const char *txt){

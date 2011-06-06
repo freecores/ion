@@ -158,7 +158,9 @@ isr_return:
 
 # void setup_cache(void) -- invalidates all I- and D-Cache lines (uses no RAM)
 setup_cache:
-    lui     $a0,0x0001          # Enable I-cache line invalidation
+    mfc0    $a0,$12
+    lui     $a1,0x01            # Enable I-cache line invalidation
+    or      $a0,$a0,$a1
     mtc0    $a0,$12
     
     # In order to invalidate a I-Cache line we have to write its tag number to 
@@ -191,9 +193,11 @@ inv_d_cache_loop:
     blt     $a2,$a1,inv_d_cache_loop
     addi    $a2,1    
     
+    mfc0    $a0,$12
     lui     $a1,0x0002          # Leave with cache enabled
+    or      $a0,$a0,$a1
     jr      $ra
-    mtc0    $a1,$12   
+    mtc0    $a0,$12   
    
    
 #-- FIXME inherited from Plasma, needs to be refactored

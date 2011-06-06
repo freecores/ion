@@ -66,7 +66,8 @@ interrupt_vector:
 #-------------------------------------------------------------------------------
 
 start_test:
-    mtc0    $0,$12              # disable interrupts
+    li      $a0,0x00000002
+    mtc0    $a0,$12             # disable interrupts and cache
 
     .ifdef  TEST_CACHE          # if we're going to test the I-caches then
     jal     init_cache          # invalidate all the I-Cache lines now
@@ -323,6 +324,8 @@ qqqq:
 # void init_cache(void) -- invalidates all I-Cache lines (uses no RAM)
 init_cache:
     li      $a0,0x00010000      # Disable cache, enable I-cache line invalidation
+    mfc0    $a1,$12
+    or      $a0,$a0,$a1
     mtc0    $a0,$12
 
     # In order to invalidate a I-Cache line we have to write its tag number to
@@ -341,7 +344,7 @@ inv_i_cache_loop:
 
     mfc0    $a0,$12
     li      $a1,0x00020000      # Leave cache enabled
-    or      $a0,$a1,$a1
+    or      $a0,$a0,$a1
     jr      $ra
     mtc0    $a0,$12
 

@@ -46,7 +46,9 @@ interrupt_vector:
 #-------------------------------------------------------------------------------
 
 start_boot:
-    mtc0    $0,$12              # disable interrupts
+    mfc0    $a0,$12
+    andi    $a0,$a0,0xfffe
+    mtc0    $a0,$12             # disable interrupts
 
     la      $a0,msg0
     jal     puts
@@ -156,7 +158,9 @@ put_hex_wait_tx_rdy:
 # void invalidate_i_cache(void) -- invalidates all I-Cache lines (uses no RAM)
 invalidate_i_cache:
     li      $a0,0x00010000      # Disable cache, enable I-cache line invalidation
-    mtc0    $a0,$12
+    mfc0    $a0,$12
+    or      $a1,$a0,$a1
+    mtc0    $a1,$12
     
     # In order to invalidate a I-Cache line we have to write its tag number to 
     # any address while bits CP0[12].17:16=01. The write will be executed as a
@@ -187,6 +191,8 @@ inv_d_cache_loop:
     addi    $a2,1    
     
     li      $a1,0x00020000      # Leave with cache enabled
+    mfc0    $a0,$12
+    or      $a1,$a0,$a1
     jr      $ra
     mtc0    $a1,$12
 

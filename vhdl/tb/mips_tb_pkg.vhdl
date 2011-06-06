@@ -2,10 +2,10 @@
 -- mips_tb_pkg.vhdl -- Functions and data for the simulation test benches.
 --------------------------------------------------------------------------------
 -- Most of this file deals with the 'simulation log': the CPU execution history
--- is logged to a text file for easy comparison to a similaro log written by the
--- software simulator. This is meant as a debugging tool and is explained to 
+-- is logged to a text file for easy comparison to a similar log written by the
+-- software simulator. This is meant as a debugging tool and is explained in
 -- some detail in the project doc.
--- It is used as a verification tool at least while no better verification test
+-- It is used as a verification tool at least while no other verification test
 -- bench exists.
 --------------------------------------------------------------------------------
 -- FIXME Console logging code should be here too
@@ -15,6 +15,7 @@
 -- to expedite things, a number of trial-and-error hacks have been performed on
 -- the code below. Mostly, the adjustment of the displayed PC.
 -- This is just the kind of hdl you don't want prospective employers to see :)
+-- At least the synthesis tools never get to see it, it's simulation only.
 -- 
 -- The problem is: each change in the CPU state is logged in a text line, in 
 -- which the address of the instruction that caused the change is included. 
@@ -24,6 +25,14 @@
 -- tweak them again as the cache implementation changes. Eventually I aim to
 -- make this code fully independent of the cache implementation; it should
 -- only depend on the cpu. I will do this step by step, as I do all the rest.
+--------------------------------------------------------------------------------
+-- NOTES (tagged in the code as @note1, etc.):
+--
+-- note1:
+-- The multiplier LO/HI register change logging has been disabled (commented
+-- out) until fixed (it fails in code sample 'adventure').
+-- Please note it's the LOGGING that fails, not the instruction.
+--
 --------------------------------------------------------------------------------
 
 library ieee,modelsim_lib;
@@ -48,6 +57,11 @@ type t_log_info is record
       
     cp0_epc :               t_pc;
     prev_epc :              t_pc;
+    cp0_status :            std_logic_vector(5 downto 0);
+    cp0_cache_control :     std_logic_vector(1 downto 0);
+    prev_status :           t_word;
+    p1_set_cp0 :            std_logic;
+    pc_mtc0 :               t_word;
     
     pc_m :                  t_pc_queue;
     
@@ -116,6 +130,7 @@ variable i : integer;
 variable ri : std_logic_vector(7 downto 0);
 variable full_pc, temp, temp2 : t_word;
 variable k : integer := 2;
+variable log_trap_status : boolean := false;
 begin
     
     -- Trigger logging if the CPU fetches from trigger address
@@ -181,6 +196,8 @@ begin
         end loop;        
                            
         -- Log aux register changes ---------------------------------
+        
+        -- Mult/div module, register LO
         if info.prev_lo /= info.reg_lo and info.prev_lo(0)/='U' then
             -- Adjust opcode PC when LO came from the mul module
             if info.mdiv_pending then
@@ -198,14 +215,18 @@ begin
                 temp := not info.reg_lo;
                 temp := temp + 1;
                 if info.log_triggered then
-                    print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(temp));
+                    -- FIXME removed temporarily until fixed (@note1)
+                    --print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(temp));
                 end if;
             else
                 if info.log_triggered then
-                    print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(info.reg_lo));
+                    -- FIXME removed temporarily until fixed (@note1)
+                    --print(l_file, "("& hstr(temp2)& ") [LO]="& hstr(info.reg_lo));
                 end if;
             end if;
         end if;
+        
+        -- Mult/div module, register HI
         if info.prev_hi /= info.reg_hi and info.prev_hi(0)/='U' then
             -- Adjust opcode PC when HI came from the mul module
             if info.mdiv_pending then
@@ -216,10 +237,12 @@ begin
             end if;
             
             if info.log_triggered then
-                print(l_file, "("& hstr(temp2)& ") [HI]="& hstr(info.reg_hi));
+                -- FIXME removed temporarily until fixed (@note1)
+                --print(l_file, "("& hstr(temp2)& ") [HI]="& hstr(info.reg_hi));
             end if;
         end if;                
-                       
+        
+        -- CP0, register EPC
         if info.prev_epc /= info.cp0_epc and info.cp0_epc(31)/='U'  then
             temp := info.cp0_epc & "00";
             if info.log_triggered then
@@ -228,19 +251,42 @@ begin
                 print(l_file, "("& hstr(info.exception_pc)& ") [EP]="& hstr(temp));
             end if;
             info.prev_epc <= info.cp0_epc;
+            
+            log_trap_status := true;
+        else
+            log_trap_status := false;
         end if;
 
+        -- CP0, register SR
+        
+        -- If SR changed by mtc0 instruction, get the mtc0 address
+        if info.p1_set_cp0='1' and info.cp0_status(1)='1' then
+            info.pc_mtc0 <= info.pc_m(k-1);
+        end if;
+        
+        -- Build SR from separate CPU signals
+        temp := X"000" & "00" & info.cp0_cache_control & 
+                X"00" & "00" & info.cp0_status;
+        if info.prev_status /= temp and info.cp0_status(0)/='U' then
+            if info.log_triggered then
+                if log_trap_status then
+                    -- The instruction that caused the SR change is the last 
+                    -- recorded trap/syscall exception.
+                    print(l_file, "("& hstr(info.exception_pc)& ") [SR]="& hstr(temp));
+                else
+                    -- The instruction that caused the change is mtc0
+                    print(l_file, "("& hstr(info.pc_mtc0)& ") [SR]="& hstr(temp));
+                end if;
+            end if;
+            info.prev_status <= temp;
+        end if;
 
+        
         -- Save present cycle info to compare the next cycle --------
         info.prev_rbank <= info.rbank;
         info.prev_hi <= info.reg_hi;
         info.prev_lo <= info.reg_lo;
-        
-        --info.pc_m(3) <= info.pc_m(2);
-        --info.pc_m(2) <= info.pc_m(1);
-        --info.pc_m(1) <= info.pc_m(0);
-        --info.pc_m(0) <= info.present_code_rd_addr & "00";
-        
+
     end if;
     
     -- Update instruction address table only at the 1st cycle of each 
@@ -306,6 +352,9 @@ begin
     init_signal_spy("/"&entity_name&"/mult_div/negate_reg", signal_name&".negate_reg_lo", 0, -1);
     init_signal_spy("/"&entity_name&"/mult_div/count_reg", signal_name&".mdiv_count_reg", 0, -1);
     init_signal_spy("/"&entity_name&"/cp0_epc", signal_name&".cp0_epc", 0, -1);
+    init_signal_spy("/"&entity_name&"/cp0_status", signal_name&".cp0_status", 0, -1);
+    init_signal_spy("/"&entity_name&"/p1_set_cp0", signal_name&".p1_set_cp0", 0, -1);
+    init_signal_spy("/"&entity_name&"/cp0_cache_control", signal_name&".cp0_cache_control", 0, -1);
     init_signal_spy("/"&entity_name&"/data_rd_vma", signal_name&".data_rd_vma", 0, -1);
     init_signal_spy("/"&entity_name&"/p1_rbank_we", signal_name&".p1_rbank_we", 0, -1);
     init_signal_spy("/"&entity_name&"/code_rd_vma", signal_name&".code_rd_vma", 0, -1);

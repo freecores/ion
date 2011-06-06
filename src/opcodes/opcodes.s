@@ -70,6 +70,7 @@ entry:
     # so we will not save any registers (there's no stack anyway)
 InterruptVector:
     mfc0    $k0,$13             # Get trap cause code
+    srl     $k0,$k0,2
     andi    $k0,$k0,0x01f
     ori     $k1,$zero,0x8       # was it a syscall?
     beq     $k0,$k1,trap_syscall
@@ -121,13 +122,19 @@ StartTest:
     .else
     mtc0    $0,$12              # disable interrupts, disable cache
     .endif
+    
+    li      $k0,0x00020000      # enter user mode
+    mtc0    $k0,$12
+    ori     $k0,0x01
+    mtc0    $k0,$12             # verify COP* in user mode triggers trap (@log)
+    
     lui     $20,0x2000          # serial port write address
     ori     $21,$0,'\n'         # <CR> character
     ori     $22,$0,'X'          # 'X' letter
     ori     $23,$0,'\r'
     ori     $24,$0,0x0f80       # temp memory
 
-    sb      $23,0($20)
+    sb      $23,0($20)          # test a bunch of byte-wide stores 
     sb      $21,0($20)
     sb      $23,0($20)
     sb      $21,0($20)
@@ -755,7 +762,7 @@ break_jump_test1:
     break   0               # check if store instruction is aborted
     sb      $4,0($20)
 
-    j       break_jump_test2# check if break works in delay slot of jump
+    j       break_jump_test2 # check if break works in delay slot of jump
     break   0
     nop
     j       break_continue
@@ -787,9 +794,8 @@ break_continue:
 syscall_jump_test1:
     add     $4,$4,1         # make sure the jump shows in the log (@log)
 
-    # TODO traps in delay slots not supported yet
-    #j       syscall_jump_test2 # check if syscall works in delay slot of jump
-    #break   0
+    j       syscall_jump_test2 # check if syscall works in delay slot of jump
+    syscall 0
     nop
     j       syscall_continue
     nop
@@ -1410,7 +1416,7 @@ $DONE:
 
 # void setup_cache(void) -- invalidates all I- and D-Cache lines (uses no RAM)
 setup_cache:
-    lui     $a0,0x0001          # Enable I-cache line invalidation
+    li      $a0,0x00010002      # Enable I-cache line invalidation
     mtc0    $a0,$12
     
     # In order to invalidate a I-Cache line we have to write its tag number to 
@@ -1443,7 +1449,7 @@ inv_d_cache_loop:
     blt     $a2,$a1,inv_d_cache_loop
     addi    $a2,1    
     
-    lui     $a1,0x0002          # Leave with cache enabled
+    li      $a1,0x00020002      # Leave with cache enabled
     jr      $ra
     mtc0    $a1,$12       
     .set    reorder
