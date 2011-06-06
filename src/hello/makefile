@@ -34,7 +34,7 @@ hello: hello.c
 # Create VHDL file for simulation test bench using TB2 template
 hello_sim: hello
 	$(TO_VHDL) --code hello.code --data hello.data \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
+		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) --log_trigger=0xbfc00000 \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
 
