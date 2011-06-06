@@ -6,6 +6,10 @@ the system.
 
 Last modified: Apr/04/2011
 
+WARNING: As of revision 154 (June 6th) this document is VERY BADLY OUT OF DATE.
+Until I get around to updating it and remove this warning) take anything you
+read here with a grain of salt; rely on the sources only!
+
 TO BE DONE: Some stub cache timing diagrams still missing.
 
 Send bug reports or comments to ja_rd[at]hotmail[dot]com
