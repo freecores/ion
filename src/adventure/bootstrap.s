@@ -48,7 +48,7 @@ interrupt_vector:
 start_boot:
     mfc0    $a0,$12
     andi    $a0,$a0,0xfffe
-    mtc0    $a0,$12             # disable interrupts
+    mtc0    $a0,$12             # disable interrupts, disable cache
 
     la      $a0,msg0
     jal     puts
@@ -61,8 +61,9 @@ start_boot:
     jal     puts
     nop
 
-    jal     invalidate_i_cache
-    nop
+    # No need to set up the cache, the init code will do it anyway
+    #jal     setup_cache
+    #nop
 
     li      $a0,FLASH_BASE
     jr      $a0
@@ -155,10 +156,11 @@ put_hex_wait_tx_rdy:
     jr      $ra
     nop
 
-# void invalidate_i_cache(void) -- invalidates all I-Cache lines (uses no RAM)
-invalidate_i_cache:
-    li      $a0,0x00010000      # Disable cache, enable I-cache line invalidation
+# void setup_cache(void) -- invalidates all I-Cache lines (uses no RAM)
+setup_cache:
+    lui     $a1,0x0001      # Disable cache, enable I-cache line invalidation
     mfc0    $a0,$12
+    andi    $a0,$a0,0xffff
     or      $a1,$a0,$a1
     mtc0    $a1,$12
     
@@ -190,8 +192,9 @@ inv_d_cache_loop:
     blt     $a2,$a1,inv_d_cache_loop
     addi    $a2,1    
     
-    li      $a1,0x00020000      # Leave with cache enabled
+    lui     $a1,0x0002          # Leave with cache enabled
     mfc0    $a0,$12
+    andi    $a0,$a0,0xffff
     or      $a1,$a0,$a1
     jr      $ra
     mtc0    $a1,$12

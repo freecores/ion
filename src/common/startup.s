@@ -39,16 +39,16 @@
 entry:
     .set noreorder
 
+    # Initialize the cache
+    jal     setup_cache
+    nop
+    
     # These four instructions should be the first instructions.
     # The linker script defined these symbols
     la      $gp, _gp                # initialize global pointer
     la      $5, __bss_start         # $5 = .sbss_start
     la      $4, _end                # $2 = .bss_end
     la      $sp, init_stack+STACK_SIZE-24 #initialize stack pointer
-
-    # Initialize the cache
-    jal     setup_cache
-    nop
     
     # Clear BSS area
 $BSS_CLEAR:
@@ -68,6 +68,7 @@ $BSS_CLEAR:
     nop
 $L1:
     j       $L1
+    nop
 
    .end     entry
 
@@ -80,77 +81,20 @@ interrupt_service_routine:
    .set     noreorder
    .set     noat
 
-   #Registers $26 and $27 are reserved for the OS
-   #Save all temporary registers
-   #Slots 0($29) through 12($29) reserved for saving a0-a3
-   addi     $29, $29, -104  #adjust sp
-   sw       $1,  16($29)    #at
-   sw       $2,  20($29)    #v0
-   sw       $3,  24($29)    #v1
-   sw       $4,  28($29)    #a0
-   sw       $5,  32($29)    #a1
-   sw       $6,  36($29)    #a2
-   sw       $7,  40($29)    #a3
-   sw       $8,  44($29)    #t0
-   sw       $9,  48($29)    #t1
-   sw       $10, 52($29)    #t2
-   sw       $11, 56($29)    #t3
-   sw       $12, 60($29)    #t4
-   sw       $13, 64($29)    #t5
-   sw       $14, 68($29)    #t6
-   sw       $15, 72($29)    #t7
-   sw       $24, 76($29)    #t8
-   sw       $25, 80($29)    #t9
-   sw       $31, 84($29)    #lr
-   mfc0     $26, $14        #C0_EPC=14 (Exception PC)
-   addi     $26, $26, -4    #Backup one opcode
-   sw       $26, 88($29)    #pc
-   mfhi     $27
-   sw       $27, 92($29)    #hi
-   mflo     $27
-   sw       $27, 96($29)    #lo
 
-   lui      $6,  0x2000    
-   lw       $4,  0x20($6)   #IRQ_STATUS
-   nop
-   lw       $6,  0x10($6)   #IRQ_MASK
-   nop
-   and      $4,  $4, $6
-   jal      trap_service
-   addi     $5,  $29, 0
-
-   #Restore all temporary registers
-   lw       $1,  16($29)    #at
-   lw       $2,  20($29)    #v0
-   lw       $3,  24($29)    #v1
-   lw       $4,  28($29)    #a0
-   lw       $5,  32($29)    #a1
-   lw       $6,  36($29)    #a2
-   lw       $7,  40($29)    #a3
-   lw       $8,  44($29)    #t0
-   lw       $9,  48($29)    #t1
-   lw       $10, 52($29)    #t2
-   lw       $11, 56($29)    #t3
-   lw       $12, 60($29)    #t4
-   lw       $13, 64($29)    #t5
-   lw       $14, 68($29)    #t6
-   lw       $15, 72($29)    #t7
-   lw       $24, 76($29)    #t8
-   lw       $25, 80($29)    #t9
-   lw       $31, 84($29)    #lr
-   lw       $26, 88($29)    #pc
-   lw       $27, 92($29)    #hi
-   nop      
-   mthi     $27
-   lw       $27, 96($29)    #lo
-   nop      
-   mtlo     $27
-   addi     $29, $29, 104   #adjust sp
-
-isr_return:
-   ori      $27, $0, 0x1    #re-enable interrupts
-   jr       $26
-   mtc0     $27, $12        #STATUS=1; enable interrupts
+trap_return:
+    mfc0    $k1,$14             # C0_EPC=14 (Exception PC)
+    mfc0    $k0,$13             # Get bit 31 (BD) from C0 cause register
+    srl     $k0,31
+    andi    $k0,$k0,1
+    bnez    $k0,trap_return_delay_slot
+    addi    $k1,$k1,4           # skip trap instruction
+    jr      $k1
+    nop
+trap_return_delay_slot:
+    addi    $k1,$k1,4           # skip jump instruction too
+    jr      $k1                 # (we just added 8 to epc)
+    rfe
 
    .end     interrupt_service_routine
    .set     at
@@ -160,6 +104,7 @@ isr_return:
 setup_cache:
     mfc0    $a0,$12
     lui     $a1,0x01            # Enable I-cache line invalidation
+    andi    $a0,$a0,0xffff
     or      $a0,$a0,$a1
     mtc0    $a0,$12
     
@@ -194,7 +139,8 @@ inv_d_cache_loop:
     addi    $a2,1    
     
     mfc0    $a0,$12
-    lui     $a1,0x0002          # Leave with cache enabled
+    lui     $a1,0x0002          # Leave with cache enabled and in kernel mode
+    andi    $a0,$a0,0xffff
     or      $a0,$a0,$a1
     jr      $ra
     mtc0    $a0,$12   
