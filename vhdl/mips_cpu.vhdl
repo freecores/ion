@@ -14,9 +14,8 @@
 --------------------------------------------------------------------------------
 --### MIPS-I things not implemented
 --
--- 1.- RTE instruction (or ERET) missing, with CP0.SR KUo/IEo & KUP/IEp flags.
--- 2.- Most of the R3000 CP0 registers and of course all of the CP1.
--- 3.- External interrupts missing, with CP0.SR IR, NMI and IM7..0 flags.
+-- 1.- Most of the R3000 CP0 registers and of course all of the CP1.
+-- 2.- External interrupts missing, with CP0.SR IR, NMI and IM7..0 flags.
 --
 --### Things with provisional implementation
 -- 
@@ -35,6 +34,12 @@
 --     space in this version.
 --     Besides, see point 2 above about the missing SR bits.
 --
+--------------------------------------------------------------------------------
+-- KNOWN BUGS:
+--
+-- 1.- The instruction after entering user mode (i.e. the instruction after the
+--     MTC0 or RFE that clears the KU flag) is executed in kernel mode. 
+--     This can be easily fixed but is not very urgent.
 --------------------------------------------------------------------------------
 
 library ieee;
