@@ -6,10 +6,6 @@
 -- created:       Jan/11/2011
 -- last modified: Jun/05/2011 (ja_rd@hotmail.com)
 --------------------------------------------------------------------------------
--- Use under the terms of the GPL.
--- Software 'as is' without warranty.  Author liable for nothing.
---
---------------------------------------------------------------------------------
 -- Please read file /doc/ion_project.txt for usage instructions.
 --------------------------------------------------------------------------------
 --### MIPS-I things not implemented
@@ -37,9 +33,35 @@
 --------------------------------------------------------------------------------
 -- KNOWN BUGS:
 --
--- 1.- The instruction after entering user mode (i.e. the instruction after the
---     MTC0 or RFE that clears the KU flag) is executed in kernel mode. 
+-- 1.- The instruction executed right after entering user mode (i.e. the 
+--     instruction after the MTC0 or RFE that clears the KU flag) is executed 
+--     in kernel mode (instead of user mode). This is a gapping security hole,
+--     in case it makes any sense to speak of security in this project at this
+--     stage. 
 --     This can be easily fixed but is not very urgent.
+--------------------------------------------------------------------------------
+-- Copyright (C) 2010 Jose A. Ruiz
+--                                                              
+-- This source file may be used and distributed without         
+-- restriction provided that this copyright statement is not    
+-- removed from the file and that any derivative work contains  
+-- the original copyright notice and the associated disclaimer. 
+--                                                              
+-- This source file is free software; you can redistribute it   
+-- and/or modify it under the terms of the GNU Lesser General   
+-- Public License as published by the Free Software Foundation; 
+-- either version 2.1 of the License, or (at your option) any   
+-- later version.                                               
+--                                                              
+-- This source is distributed in the hope that it will be       
+-- useful, but WITHOUT ANY WARRANTY; without even the implied   
+-- warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      
+-- PURPOSE.  See the GNU Lesser General Public License for more 
+-- details.                                                     
+--                                                              
+-- You should have received a copy of the GNU Lesser General    
+-- Public License along with this source; if not, download it   
+-- from http://www.opencores.org/lgpl.shtml
 --------------------------------------------------------------------------------
 
 library ieee;
