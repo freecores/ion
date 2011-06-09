@@ -4,7 +4,7 @@
 -- WARNING: Hacked up for light8080 demo. Poor performance, no formal testing!
 -- I don't advise using this in for any general purpose.
 --##############################################################################
--- Copyright (C) 2010 Jose A. Ruiz
+-- Copyright (C) 2011 Jose A. Ruiz
 --                                                              
 -- This source file may be used and distributed without         
 -- restriction provided that this copyright statement is not    

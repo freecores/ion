@@ -40,7 +40,7 @@
 --     stage. 
 --     This can be easily fixed but is not very urgent.
 --------------------------------------------------------------------------------
--- Copyright (C) 2010 Jose A. Ruiz
+-- Copyright (C) 2011 Jose A. Ruiz
 --                                                              
 -- This source file may be used and distributed without         
 -- restriction provided that this copyright statement is not    
