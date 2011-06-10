@@ -1,28 +1,32 @@
 /*------------------------------------------------------------------------------
 * slite.c -- MIPS-I simulator based on Steve Rhoad's "mlite"
 *
-* This is a slightly modified version of Steve Rhoad's "mlite" simulator, which
+* This is a heavily modified version of Steve Rhoad's "mlite" simulator, which
 * is part of his PLASMA project (original date: 1/31/01).
 *
 *-------------------------------------------------------------------------------
 * Usage:
-*     slite <code file name> <data file name>
+*     slite [options]
 *
-* The program will allocate a chunk of RAM (MEM_SIZE bytes) and map it to
-* address 0x00000000 of the simulated CPU.
-* Then it will read the 'code file' (as a big-endian plain binary) onto address
-* 0x0 of the simulated CPU memory, and 'data file' on address 0x10000.
-* Finally, will reset the CPU and enter the interactive debugger.
+* See function 'usage' for a very brief explaination of the available options.
 *
-* (Note that the above is only necessary if the system does not have caches,
-* because of the Harvard architecture. With caches in place, program loading
-* would be antirely conventional).
+* Generally, upon startup the program will allocate some RAM for the simulated
+* system and initialize it with the contents of one or more plain binary,
+* big-endian object files. Then it will simulate a cpu reset and start the
+* simulation, in interactive or batch mode.
 *
 * A simulation log file will be dumped to file "sw_sim_log.txt". This log can be
 * used to compare with an equivalent log dumped by the hardware simulation, as
 * a simple way to validate the hardware for a given program. See the project
 * readme files for details.
 *
+*-------------------------------------------------------------------------------
+* This program simulates the CPU connected to a certain memory map (chosen from
+* a set of predefined options) and to a UART.
+* The UART is hardcoded at a fixed address and is not configurable in runtime.
+* The simulated UART includes the real UART status bits, hardcoded to 'always
+* ready' so that software and hardware simulations can be made identical with
+* more ease (no need to simulate the actual cycle count of TX/RX, etc.).
 *-------------------------------------------------------------------------------
 * KNOWN BUGS:
 *
@@ -33,7 +37,7 @@
 * COPYRIGHT:    Software placed into the public domain by the author.
 *               Software 'as is' without warranty.  Author liable for nothing.
 *
-* IMPORTANT: Assumes host is little endian.
+* IMPORTANT: Assumes host is little endian and target is big endian.
 *-----------------------------------------------------------------------------*/
 
 #include <stdio.h>
@@ -43,12 +47,16 @@
 #include <ctype.h>
 #include <assert.h>
 
+/** CPU identification code (contents of register CP0[15], PRId */
 #define R3000_ID (0x00000200)
 
 /** Set to !=0 to disable file logging (much faster simulation) */
+/* alternately you can just set an unreachable log trigger address */
 #define FILE_LOGGING_DISABLED (0)
 /** Define to enable cache simulation (unimplemented) */
 //#define ENABLE_CACHE
+/** Set to !=0 to display a fancier listing of register values */
+#define FANCY_REGISTER_DISPLAY (1)
 
 
 /*---- Definition of simulated system parameters -----------------------------*/
@@ -159,6 +167,10 @@ t_map memory_maps[NUM_MEM_MAPS] = {
 
 /** Values for the command line arguments */
 typedef struct s_args {
+    /** !=0 to trap on unimplemented opcodes, 0 to print warning and NOP */
+    uint32_t trap_on_reserved;
+    /** address to start execution from (by default, reset vector) */
+    uint32_t start_addr;
     /** memory map to be used */
     uint32_t memory_map;
     /** implement unaligned load/stores (don't just trap them) */
@@ -292,6 +304,7 @@ typedef struct s_trace {
    uint32_t log_trigger_address;          /**< */
    int pr[32];                            /**< last value of register bank */
    int hi, lo, epc, status;               /**< last value of internal regs */
+   int disasm_ptr;                        /**< disassembly pointer */
 } t_trace;
 
 typedef struct s_state {
@@ -310,46 +323,52 @@ typedef struct s_state {
    unsigned int lo;
    int status;
    unsigned cp0_cause;
-   int userMode;
-   int processId;
+   int userMode;                /**< DEPRECATED, to be removed */
+   int processId;               /**< DEPRECATED, to be removed */
    int exceptionId;             /**< DEPRECATED, to be removed */
-   int faultAddr;
-   int irqStatus;
+   int faultAddr;               /**< DEPRECATED, to be removed */
+   int irqStatus;               /**< DEPRECATED, to be removed */
    int skip;
    t_trace t;
-   //unsigned char *mem;
    t_block blocks[NUM_MEM_BLOCKS];
    int wakeup;
    int big_endian;
 } t_state;
 
+static char *reg_names[]={
+    "zero","at","v0","v1","a0","a1","a2","a3",
+    "t0","t1","t2","t3","t4","t5","t6","t7",
+    "s0","s1","s2","s3","s4","s5","s6","s7",
+    "t8","t9","k0","k1","gp","sp","s8","ra"
+};
+
 static char *opcode_string[]={
-   "SPECIAL","REGIMM","J","JAL","BEQ","BNE","BLEZ","BGTZ",
-   "ADDI","ADDIU","SLTI","SLTIU","ANDI","ORI","XORI","LUI",
-   "COP0","COP1","COP2","COP3","BEQL","BNEL","BLEZL","BGTZL",
-   "?","?","?","?","?","?","?","?",
-   "LB","LH","LWL","LW","LBU","LHU","LWR","?",
-   "SB","SH","SWL","SW","?","?","SWR","CACHE",
-   "LL","LWC1","LWC2","LWC3","?","LDC1","LDC2","LDC3"
-   "SC","SWC1","SWC2","SWC3","?","SDC1","SDC2","SDC3"
+   "0SPECIAL","0REGIMM","1J","1JAL","2BEQ","2BNE","3BLEZ","3BGTZ",
+   "5ADDI","5ADDIU","5SLTI","5SLTIU","5ANDI","5ORI","5XORI","6LUI",
+   "cCOP0","cCOP1","cCOP2","cCOP3","2BEQL","2BNEL","3BLEZL","3BGTZL",
+   "0?","0?","0?","0?","0?","0?","0?","0?",
+   "8LB","8LH","8LWL","8LW","8LBU","8LHU","8LWR","0?",
+   "8SB","8SH","8SWL","8SW","0?","0?","8SWR","0CACHE",
+   "0LL","0LWC1","0LWC2","0LWC3","?","0LDC1","0LDC2","0LDC3"
+   "0SC","0SWC1","0SWC2","0SWC3","?","0SDC1","0SDC2","0SDC3"
 };
 
 static char *special_string[]={
-   "SLL","?","SRL","SRA","SLLV","?","SRLV","SRAV",
-   "JR","JALR","MOVZ","MOVN","SYSCALL","BREAK","?","SYNC",
-   "MFHI","MTHI","MFLO","MTLO","?","?","?","?",
-   "MULT","MULTU","DIV","DIVU","?","?","?","?",
-   "ADD","ADDU","SUB","SUBU","AND","OR","XOR","NOR",
-   "?","?","SLT","SLTU","?","DADDU","?","?",
-   "TGE","TGEU","TLT","TLTU","TEQ","?","TNE","?",
-   "?","?","?","?","?","?","?","?"
+   "4SLL","0?","4SRL","4SRA","bSLLV","0?","bSRLV","bSRAV",
+   "aJR","aJALR","0MOVZ","0MOVN","0SYSCALL","0BREAK","0?","0SYNC",
+   "0MFHI","0MTHI","0MFLO","0MTLO","0?","0?","0?","0?",
+   "0MULT","0MULTU","0DIV","0DIVU","0?","0?","0?","0?",
+   "7ADD","7ADDU","7SUB","7SUBU","7AND","7OR","7XOR","7NOR",
+   "0?","0?","7SLT","7SLTU","0?","0DADDU","0?","0?",
+   "7TGE","7TGEU","7TLT","7TLTU","7TEQ","0?","7TNE","0?",
+   "0?","0?","0?","0?","0?","0?","0?","0?"
 };
 
 static char *regimm_string[]={
-   "BLTZ","BGEZ","BLTZL","BGEZL","?","?","?","?",
-   "TGEI","TGEIU","TLTI","TLTIU","TEQI","?","TNEI","?",
-   "BLTZAL","BEQZAL","BLTZALL","BGEZALL","?","?","?","?",
-   "?","?","?","?","?","?","?","?"
+   "9BLTZ","9BGEZ","9BLTZL","9BGEZL","0?","0?","0?","0?",
+   "0TGEI","0TGEIU","0TLTI","0TLTIU","0TEQI","0?","0TNEI","0?",
+   "9BLTZAL","9BEQZAL","9BLTZALL","9BGEZALL","0?","0?","0?","0?",
+   "0?","0?","0?","0?","0?","0?","0?","0?"
 };
 
 static unsigned int HWMemory[8];
@@ -489,8 +508,8 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
         value = *(unsigned char*)ptr;
         break;
     default:
-        /* FIXME this is a bug, should quit */
-        printf("ERROR");
+        /* This is a bug, display warning */
+        printf("\n\n**** BUG: wrong memory read size at 0x%08x\n\n", s->pc);
     }
 
     //log_read(s, full_address, value, size, log);
@@ -625,8 +644,8 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
         *(char*)ptr = (unsigned char)value;
         break;
     default:
-        /* FIXME this is a bug, should quit */
-        printf("ERROR");
+        /* This is a bug, display warning */
+        printf("\n\n**** BUG: wrong memory write size at 0x%08x\n\n", s->pc);
     }
 }
 
@@ -776,6 +795,10 @@ void cycle(t_state *s, int show_mode){
     int *r=s->r;
     unsigned int *u=(unsigned int*)s->r;
     unsigned int ptr, epc, rSave;
+    char format;
+    uint32_t aux;
+    uint32_t target_offset16;
+    uint32_t target_long;
 
     /* fetch and decode instruction */
     opcode = mem_read(s, 4, s->pc, 0);
@@ -790,6 +813,12 @@ void cycle(t_state *s, int show_mode){
     target = (opcode << 6) >> 4;
     ptr = (short)imm + r[rs];
     r[0] = 0;
+    target_offset16 = opcode & 0xffff;
+    if(target_offset16 & 0x8000){
+        target_offset16 |= 0xffff0000;
+    }
+    target_long = (opcode & 0x03ffffff)<<2;
+    target_long |= (s->pc & 0xf0000000);
 
     /* Trigger log if we fetch from trigger address */
     if(s->pc == s->t.log_trigger_address){
@@ -800,17 +829,87 @@ void cycle(t_state *s, int show_mode){
     if(show_mode){
         printf("%8.8x %8.8x ", s->pc, opcode);
         if(op == 0){
-            printf("%8s ", special_string[func]);
+            printf("  %-6s ", &(special_string[func][1]));
+            format = special_string[func][0];
         }
         else if(op == 1){
-            printf("%8s ", regimm_string[rt]);
+            printf("  %-6s ", &(regimm_string[rt][1]));
+            format = regimm_string[rt][0];
         }
         else{
-            printf("%8s ", opcode_string[op]);
+            format = opcode_string[op][0];
+            if(format!='c'){
+                printf("  %-6s ", &(opcode_string[op][1]));
+            }
+            else{
+                aux = op&0x03;
+                switch(rs){
+                    case 16:
+                        /* FIXME partial decoding */
+                        printf("  RFE      "); format = ' '; break;
+                    case 4:
+                        printf("  MTC%1d   ", aux); break;
+                    case 0:
+                        printf("  MFC%1d   ", aux); break;
+                    default:
+                        printf("  ???      "); break;
+                        format = '?';
+                }
+            }
         }
 
-        printf("$%2.2d $%2.2d $%2.2d $%2.2d ", rs, rt, rd, re);
-        printf("%4.4x", imm);
+        switch(format){
+            case '1':
+                printf("0x%08x", target_long);
+                break;
+            case '2':
+                printf("%s,%s,0x%08x",
+                       reg_names[rt], reg_names[rs],
+                       (target_offset16*4)+s->pc+4);
+                break;
+            case '3':
+                printf("%s,0x%08x", reg_names[rt], (target_offset16*4)+s->pc+4);
+                break;
+            case '4':
+                printf("%s,%s,%d", reg_names[rd], reg_names[rt], re);
+                break;
+            case '5':
+                printf("%s,%s,0x%04x",
+                       reg_names[rt], reg_names[rs],
+                       target_offset16&0xffff);
+                break;
+            case '6':
+                printf("%s,0x%04x",
+                       reg_names[rt],
+                       target_offset16&0xffff);
+                break;
+            case '7':
+                printf("%s,%s,%s", reg_names[rd], reg_names[rs], reg_names[rt]);
+                break;
+            case '8':
+                printf("%s,%d(%s)", reg_names[rt],
+                       (target_offset16), reg_names[rs]);
+                break;
+            case '9':
+                printf("%s,0x%08x", reg_names[rt], (target_offset16*4)+s->pc+4);
+                break;
+            case 'a':
+                printf("%s", reg_names[rs]);
+                break;
+            case 'b':
+                printf("%s,%s,%s", reg_names[rd], reg_names[rt], reg_names[rs]);
+                break;
+            case 'c':
+                printf("%s,$%d", reg_names[rt], rd);
+                break;
+            case '0':
+                printf("$%2.2d $%2.2d $%2.2d $%2.2d ", rs, rt, rd, re);
+                printf("%4.4x", imm);
+                break;
+            default:;
+        }
+
+
         if(show_mode == 1){
             printf(" r[%2.2d]=%8.8x r[%2.2d]=%8.8x", rs, r[rs], rt, r[rt]);
         }
@@ -931,29 +1030,46 @@ void cycle(t_state *s, int show_mode){
     case 0x10:/*COP0*/
         if(s->status & 0x02){ /* kernel mode? */
             if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
+                //printf("mfc0: [SR]=0x%08x @ [0x%08x]\n", s->status, epc);
                 switch(rd){
                     case 12: r[rt]=s->status & 0x0000003f; break;
                     case 13: r[rt]=s->cp0_cause; break;
                     case 14: r[rt]=s->epc; break;
                     case 15: r[rt]=R3000_ID; break;
                     default:
-                        //printf("mfco [%02d]\n", rd);
                         break;
                 }
             }
             else{                         //move to CP0 (mtc0)
                 /* FIXME check CF= reg address */
-                s->status=r[rt] & 0x0003003f; /* mask W/O bits */
+                if(rd==12){
+                    s->status=r[rt] & 0x0003003f; /* mask W/O bits */
+                    //printf("mtc0: [SR]=0x%08x @ [0x%08x]\n", s->status, epc);
+                }
+                else{
+                    /* Move to unimplemented COP0 register: display warning */
+                    /* FIXME should log ignored move */
+                    printf("mtc0 [%2d]=0x%08x @ [0x%08x] IGNORED\n",
+                           rd, r[rt], epc);
+                }
+                /* FIXME remove remnants of Plasma MMU simulation */
+                /*
                 if(s->processId && (r[rt]&2)){
                     s->userMode|=r[rt]&2;
                     //printf("CpuStatus=%d %d %d\n", r[rt], s->status, s->userMode);
                     //s->wakeup = 1;
                     //printf("pc=0x%x\n", epc);
                 }
+                */
             }
         }
         else{
             /* tried to execute mtc* or mfc* in user mode: trap */
+            printf("COP0 UNAVAILABLE address=0x%08x opcode=0x%x -- ",
+                   epc, opcode);
+            print_opcode_fields(opcode);
+            printf("\n");
+
             trap_cause = 11; /* unavailable coprocessor */
             s->exceptionId=1;
         }
@@ -1017,17 +1133,20 @@ void cycle(t_state *s, int show_mode){
 //      case 0x3d:/*SDC1*/ break;
 //      case 0x3e:/*SDC2*/ break;
 //      case 0x3f:/*SDC3*/ break;
-    default:
-        ;
-        /* FIXME should trap unimplemented opcodes */
-        /* FIXME newlib */
-        printf("ERROR2 address=0x%x opcode=0x%x -- ", epc, opcode);
-        print_opcode_fields(opcode);
-        printf("\n");
-        s->wakeup=1;
+    default:  /* unimplemented opcode */
+        if(cmd_line_args.trap_on_reserved){
+            trap_cause = 10; /* reserved instruction */
+            s->exceptionId=1;
+        }
+        else{
+            printf("RESERVED OPCODE address=0x%08x opcode=0x%x -- ",
+                   epc, opcode);
+            print_opcode_fields(opcode);
+            printf("\n");
+        }
     }
 
-    /* adjust next PC if this was a ajump instruction */
+    /* adjust next PC if this was a a jump instruction */
     s->pc_next += (branch || lbranch == 1) ? imm_shift : 0;
     s->pc_next &= ~3;
     s->skip = (lbranch == 0) | skip2;
@@ -1099,6 +1218,32 @@ void show_state(t_state *s){
     int i,j;
     printf("pid=%d userMode=%d, epc=0x%x\n", s->processId, s->userMode, s->epc);
     printf("hi=0x%08x lo=0x%08x\n", s->hi, s->lo);
+
+    /* print register values */
+    #if FANCY_REGISTER_DISPLAY
+    printf(" v = [%08x %08x]  ", s->r[2], s->r[3]);
+    printf("           a = [");
+    for(i=4;i<8;i++){
+        printf("%08x ", s->r[i]);
+    }
+    printf("]\n");
+    printf(" s = [");
+    for(i=16;i<24;i++){
+        printf("%08x ", s->r[i]);
+    }
+    printf("]\n");
+    printf(" t = [");
+    for(i=8;i<16;i++){
+        printf("%08x ", s->r[i]);
+    }
+    printf("-\n");
+    printf("      %08x %08x]  ", s->r[24], s->r[25]);
+    printf("                          ");
+    printf("  k = [ %08x %08x ]\n", s->r[26], s->r[27]);
+    printf(" gp = %08x     sp = %08x    ", s->r[28], s->r[29]);
+    printf(" fp = %08x     ra = %08x ", s->r[30], s->r[31]);
+    printf("\n\n");
+    #else
     for(i = 0; i < 4; ++i){
         printf("%2.2d ", i * 8);
         for(j = 0; j < 8; ++j){
@@ -1106,14 +1251,16 @@ void show_state(t_state *s){
         }
         printf("\n");
     }
-    //printf("%8.8lx %8.8lx %8.8lx %8.8lx\n", s->pc, s->pc_next, s->hi, s->lo);
-    j = s->pc;
+    #endif
+
+    j = s->pc; /* save pc value (it's altered by the 'cycle' function) */
     for(i = -4; i <= 8; ++i){
         printf("%c", i==0 ? '*' : ' ');
         s->pc = j + i * 4;
         cycle(s, 10);
     }
-    s->pc = j;
+    s->t.disasm_ptr = s->pc; /* executing code updates the disasm pointer */
+    s->pc = j; /* restore pc value */
 }
 
 /** Show debug monitor prompt and execute user command */
@@ -1141,9 +1288,10 @@ void do_debug(t_state *s, uint32_t no_prompt){
             if(watch){
                 printf("0x%8.8x=0x%8.8x\n", watch, mem_read(s, 4, watch,0));
             }
-            printf("1=Debug 2=t_trace 3=Step 4=BreakPt 5=Go 6=Memory ");
-            printf("7=Watch 8=Jump 9=Quit A=Dump\n");
-            printf("L=LogTrigger > ");
+            printf("1=Debug   2=Trace   3=Step    4=BreakPt 5=Go      ");
+            printf("6=Memory  7=Watch   8=Jump\n");
+            printf("9=Quit    A=Dump    L=LogTrg  C=Disasm  ");
+            printf("> ");
         }
         if(ch==' ') ch = getch();
         if(ch != 'n'){
@@ -1221,6 +1369,15 @@ void do_debug(t_state *s, uint32_t no_prompt){
             scanf("%x", &(s->t.log_trigger_address));
             printf("Log trigger address=0x%x\n", s->t.log_trigger_address);
             break;
+        case 'c': case 'C':
+            j = s->pc;
+            for(i = 1; i <= 16; ++i){
+                printf("%c", i==0 ? '*' : ' ');
+                s->pc = s->t.disasm_ptr + i * 4;
+                cycle(s, 10);
+            }
+            s->t.disasm_ptr = s->pc;
+            s->pc = j;
         }
         ch = ' ';
     }
@@ -1348,6 +1505,9 @@ int main(int argc,char *argv[]){
 
 void init_trace_buffer(t_state *s, t_args *args){
     int i;
+
+    /* setup misc info related to the monitor interface */
+    s->t.disasm_ptr = VECTOR_RESET;
 
 #if FILE_LOGGING_DISABLED
     s->t.log = NULL;
@@ -1490,7 +1650,7 @@ void free_cpu(t_state *s){
 }
 
 void reset_cpu(t_state *s){
-    s->pc = VECTOR_RESET;     /* reset start vector */
+    s->pc = cmd_line_args.start_addr; /* reset start vector or cmd line address */
     s->delay_slot = 0;
     s->failed_assertions = 0; /* no failed assertions pending */
     s->status = 0x02; /* kernel mode, interrupts disabled */
@@ -1539,6 +1699,8 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
 
     /* fill cmd line args with default values */
     args->memory_map = MAP_DEFAULT;
+    args->trap_on_reserved = 1;
+    args->start_addr = VECTOR_RESET;
     args->do_unaligned = 0;
     args->no_prompt = 0;
     args->breakpoint = 0xffffffff;
@@ -1570,6 +1732,9 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
         else if(strcmp(argv[i],"--noprompt")==0){
             args->no_prompt = 1;
         }
+        else if(strcmp(argv[i],"--notrap10")==0){
+            args->trap_on_reserved = 0;
+        }
         else if(strncmp(argv[i],"--bram=", strlen("--bram="))==0){
             args->bin_filename[0] = &(argv[i][strlen("--bram=")]);
         }
@@ -1579,6 +1744,9 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
         else if(strncmp(argv[i],"--xram=", strlen("--xram="))==0){
             args->bin_filename[1] = &(argv[i][strlen("--xram=")]);
         }
+        else if(strncmp(argv[i],"--start=", strlen("--start="))==0){
+            sscanf(&(argv[i][strlen("--start=")]), "%x", &(args->start_addr));
+        }
         else if(strncmp(argv[i],"--kernel=", strlen("--kernel="))==0){
             args->bin_filename[1] = &(argv[i][strlen("--kernel=")]);
             /* FIXME uClinux kernel 'offset' hardcoded */
@@ -1586,6 +1754,9 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
         }
         else if(strncmp(argv[i],"--trigger=", strlen("--trigger="))==0){
             sscanf(&(argv[i][strlen("--trigger=")]), "%x", &(args->log_trigger_address));
+        }
+        else if(strncmp(argv[i],"--break=", strlen("--break="))==0){
+            sscanf(&(argv[i][strlen("--break=")]), "%x", &(args->breakpoint));
         }
         else if(strncmp(argv[i],"--breakpoint=", strlen("--breakpoint="))==0){
             sscanf(&(argv[i][strlen("--breakpoint=")]), "%x", &(args->breakpoint));
@@ -1614,6 +1785,9 @@ void usage(void){
     printf("                          (loads at block offset 0x2000)\n");
     printf("--flash=<file name>     : FLASH initialization file\n");
     printf("--trigger=<hex number>  : Log trigger address\n");
+    printf("--break=<hex number>    : Breakpoint address\n");
+    printf("--start=<hex number>    : Start here instead of at reset vector\n");
+    printf("--notrap10              : Reserverd opcodes are NOPs and don't trap\n");
     printf("--plasma                : Simulate Plasma instead of MIPS-I\n");
     printf("--uclinux               : Use memory map tailored to uClinux\n");
     printf("--unaligned             : Implement unaligned load/store instructions\n");
