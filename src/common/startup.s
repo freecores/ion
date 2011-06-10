@@ -29,13 +29,13 @@
     .set    STACK_SIZE,         1024        # by default, reserve 1KB
     .endif
 
-    # Reserve space for stack (BSS segment)
+    # Reserve space for regular stack (BSS segment)
     .comm init_stack, STACK_SIZE
 
     .text
     .align 2
     .global entry
-    .ent	entry
+    .ent    entry
 entry:
     .set noreorder
 
@@ -43,7 +43,6 @@ entry:
     jal     setup_cache
     nop
     
-    # These four instructions should be the first instructions.
     # The linker script defined these symbols
     la      $gp, _gp                # initialize global pointer
     la      $5, __bss_start         # $5 = .sbss_start
