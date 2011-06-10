@@ -19,8 +19,9 @@ clean:
 	*.exe *.axf *.code *.data *.bin
 
 opcodes:
-	$(AS_MIPS) -defsym XRAM_BASE=$(XRAM_START) -o opcodes.o opcodes.s
-	$(LD_MIPS) $(LFLAGS) -Map opcodes.map -s -N -o opcodes.axf opcodes.o
+	$(AS_MIPS) -o opcode_emu.o $(SRC_DIR)/common/opcode_emu.s
+	$(AS_MIPS) -defsym XRAM_BASE=$(XRAM_START) -mips32r2 -o opcodes.o opcodes.s
+	$(LD_MIPS) $(LFLAGS) -Map opcodes.map -s -N -o opcodes.axf opcodes.o opcode_emu.o
 	-@$(DUMP_MIPS) -I elf32-big --disassemble opcodes.axf > opcodes.lst
 # Dump only text segment, no .rodata on this program
 #	$(COPY_MIPS) -I elf32-big -j .text -O binary opcodes.axf opcodes.bin

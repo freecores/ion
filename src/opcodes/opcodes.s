@@ -35,6 +35,7 @@
     .set TEST_DIV, 1                    # DIV* instructions
     .set TEST_MUL, 1                    # MUL* instructions
     .set USE_CACHE, 1                   # Initialize and enable cache
+    .set EMU_MIPS32, 1                  # Emulates selected MIPS32 opcodes
     
     .set ICACHE_NUM_LINES, 256              # no. of lines in the I-Cache
     .set DCACHE_NUM_LINES, 256              # no. of lines in the D-Cache
@@ -82,8 +83,15 @@ InterruptVector:
     
     # Unimplemented instruction
 trap_unimplemented:
+    .ifgt   EMU_MIPS32
+    # jump to mips32 opcode emulator with c0_cause in $k0
+    j       opcode_emu
+    nop
+    .else
+    # just do some simple arith so the opcode tester knows we were here
     j       trap_return
     add     $4,$4,4
+    .endif
 
     # Break instruction
 trap_break:
@@ -92,7 +100,10 @@ trap_break:
     
     # Syscall instruction
 trap_syscall:
-    j       trap_return
+    mfc0    $k0,$12             # test behavior of rfe: invert bit IE of SR...
+    xori    $k0,0x01
+    mtc0    $k0,$12             # ...and see (in the @log) if rfe recovers it
+    j       trap_return         
     add     $4,$4,6
 
     # Invalid trap cause code, most likely hardware bug
@@ -112,7 +123,7 @@ trap_return:
 trap_return_delay_slot:
     addi    $k1,$k1,4           # skip jump instruction too
     jr      $k1                 # (we just added 8 to epc)
-    nop
+    rfe
 
 
 StartTest:
@@ -120,13 +131,20 @@ StartTest:
     jal     setup_cache
     nop
     .else
-    mtc0    $0,$12              # disable interrupts, disable cache
+    ori     $k0,$zero,0x1
+    mtc0    $k0,$12             # disable interrupts and cache, stay in kernel
     .endif
     
-    li      $k0,0x00020000      # enter user mode
-    mtc0    $k0,$12
+    li      $k0,0x00020000      # enter user mode...
+    mtc0    $k0,$12             # ...NOW
+    mfc0    $k0,$12             # verify COP* in user mode triggers trap (@log)
     ori     $k0,0x01
     mtc0    $k0,$12             # verify COP* in user mode triggers trap (@log)
+    # The two above COP0s should trigger a trap. The 1st one tests the delay in
+    # entering user mode.
+    
+    # The rest of the tests proceed in user mode (not that there's much 
+    # difference...)
     
     lui     $20,0x2000          # serial port write address
     ori     $21,$0,'\n'         # <CR> character
@@ -134,7 +152,7 @@ StartTest:
     ori     $23,$0,'\r'
     ori     $24,$0,0x0f80       # temp memory
 
-    sb      $23,0($20)          # test a bunch of byte-wide stores 
+    sb      $23,0($20)          # Write a message to console
     sb      $21,0($20)
     sb      $23,0($20)
     sb      $21,0($20)
@@ -142,6 +160,7 @@ StartTest:
     sb      $21,0($20)
     sb      $23,0($20)
     sb      $21,0($20)
+  
   
     ######################################
     #Arithmetic Instructions
@@ -1219,7 +1238,141 @@ ShiftTest:
     sb      $23,0($20)
     sb      $21,0($20)
  
- 
+    ######################################
+    #Emulated MIPS32r2 Instructions
+    ######################################
+    .ifgt   EMU_MIPS32
+    ori     $2,$0,'M'
+    sb      $2,0($20)
+    ori     $2,$0,'i'
+    sb      $2,0($20)
+    ori     $2,$0,'p'
+    sb      $2,0($20)
+    ori     $2,$0,'s'
+    sb      $2,0($20)
+    ori     $2,$0,'3'
+    sb      $2,0($20)
+    ori     $2,$0,'2'
+    sb      $2,0($20)
+    ori     $2,$0,'r'
+    sb      $2,0($20)
+    ori     $2,$0,'2'
+    sb      $2,0($20)
+    sb      $23,0($20)
+    sb      $21,0($20)
+
+    #-- EXT ---------------------------
+    ori     $a1,$zero,'a'
+    sb      $a1,0($20)
+    li      $a0,0x01234567
+    ext     $a1,$a0,12,8
+    addi    $a1,$a1,'A' - 0x34
+    sb      $a1,0($20)
+    ext     $a1,$a0,0,8
+    addi    $a1,$a1,'B' - 0x67
+    sb      $a1,0($20)
+    ext     $a1,$a0,0,4
+    addi    $a1,$a1,'C' - 0x7
+    sb      $a1,0($20)
+    ext     $a2,$a0,20,12
+    addi    $a2,$a2,'D' - 0x012
+    sb      $a2,0($20)
+
+    sb      $23,0($20)
+    sb      $21,0($20)
+    
+    #-- INS ---------------------------
+    ori     $a1,$zero,'b'
+    sb      $a1,0($20)
+    li      $a0,0x01234567
+    ori     $a2,$zero,0xc35a
+test_ins_1:
+    move    $a1,$a0
+    ins     $a1,$a2,0,8
+    li      $a3,0x0123455a
+    bne     $a3,$a1,test_ins_2
+    ori     $a1,$zero,'A'
+    sb      $a1,0($20)
+test_ins_2:
+    move    $a1,$a0
+    ins     $a1,$a2,4,8
+    li      $a3,0x012345a7
+    bne     $a3,$a1,test_ins_3
+    ori     $a1,$zero,'B'
+    sb      $a1,0($20)
+test_ins_3:
+    move    $a1,$a0
+    ins     $a1,$a2,24,8
+    li      $a3,0x5a234567
+    bne     $a3,$a1,test_ins_4
+    ori     $a1,$zero,'C'
+    sb      $a1,0($20)
+test_ins_4:
+    move    $a1,$a0
+    ins     $a1,$a2,30,2
+    li      $a3,0x81234567
+    bne     $a3,$a1,test_ins_5
+    ori     $a1,$zero,'D'
+    sb      $a1,0($20)
+test_ins_5:
+    sb      $23,0($20)
+    sb      $21,0($20)
+
+    #-- CLZ ---------------------------
+    ori     $a1,$zero,'c'
+    sb      $a1,0($20)
+    
+    li      $a1,0x00080000
+    clz     $a1,$a1
+    addiu   $a1,$a1,'A'-12
+    sb      $a1,0($20)
+    
+    li      $a1,0x40000000
+    clz     $a1,$a1
+    addiu   $a1,$a1,'B'-1
+    sb      $a1,0($20)
+    
+    clz     $a1,$zero
+    addiu   $a1,$a1,'C'-32
+    sb      $a1,0($20)
+
+    li      $k1,0x80000000
+    clz     $k0,$k1
+    addiu   $a1,$k0,'D'-0
+    sb      $a1,0($20)
+    
+    sb      $23,0($20)
+    sb      $21,0($20)
+
+    #-- CLO ---------------------------
+    ori     $a1,$zero,'d'
+    sb      $a1,0($20)
+    
+    li      $a1,0xfff7ffff
+    clo     $a1,$a1
+    addiu   $a1,$a1,'A'-12
+    sb      $a1,0($20)
+    
+    li      $a1,0xbfffffff
+    clo     $a1,$a1
+    addiu   $a1,$a1,'B'-1
+    sb      $a1,0($20)
+    
+    li      $a1,0xffffffff
+    clo     $a1,$a1
+    addiu   $a1,$a1,'C'-32
+    sb      $a1,0($20)
+
+    li      $k1,0x7fffffff
+    clo     $k0,$k1
+    addiu   $a1,$k0,'D'-0
+    sb      $a1,0($20)
+    
+    sb      $23,0($20)
+    sb      $21,0($20)
+    .endif
+    
+    # Print 'Done'; the rest of the tests are for log matching only
     ori     $2,$0,'D'
     sb      $2,0($20)
     ori     $2,$0,'o'
@@ -1231,6 +1384,7 @@ ShiftTest:
     sb      $23,0($20)
     sb      $21,0($20)
 
+    
     # These tests are to be evaluated by matching logs with the software 
     # simulator. There is no need to perform any actual tests here, if there is 
     # any error it will show up as a mismatch in the logs.
