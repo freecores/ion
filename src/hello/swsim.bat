@@ -3,4 +3,6 @@
     --bram=hello.code ^
     --trigger=bfc00000 ^
     --noprompt ^
+    --map=hello.map ^
+    --trace_log=trace_log.txt
     
