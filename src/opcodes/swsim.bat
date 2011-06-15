@@ -3,4 +3,5 @@
     --bram=opcodes.bin ^
     --trigger=bfc00000 ^
     --noprompt ^
+    --nomips32
     
