@@ -628,7 +628,15 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
 /** Write to debug register */
 void debug_reg_write(t_state *s, uint32_t address, uint32_t data){
 
-    printf("DEBUG REG[%04x]=%08x\n", address & 0xffff, data);
+    if((address>= 0x0000f000) && (address < 0x0000f008)){
+        /* HW interrupt trigger register */
+        s->t.irq_trigger_countdown[address-0x0000f000] = data;
+        printf("DEBUG REG[%04x]=%08x\n", address & 0xffff, data);
+    }
+    else{
+        /* all other registers are used for display (like LEDs) */
+        printf("DEBUG REG[%04x]=%08x\n", address & 0xffff, data);
+    }
 }
 
 /** Write to memory, including simulated i/o */
@@ -965,7 +973,7 @@ void process_traps(t_state *s, uint32_t epc, uint32_t rSave, uint32_t rt){
             if(s->t.irq_trigger_countdown[i]==0){
                 /* trigger interrupt i */
                 /* FIXME handle irq mask(s) in SR */
-                cause = 0; /* cause = hardware interrupt */
+                //cause = 0; /* cause = hardware interrupt */
                 s->t.irq_trigger_countdown[i]--;
             }
             else if (s->t.irq_trigger_countdown[i]>0){
@@ -1313,6 +1321,9 @@ void cycle(t_state *s, int show_mode){
                 default:
                     reserved_opcode(epc, opcode, s);
             }
+        }
+        else{
+            reserved_opcode(epc, opcode, s);
         }
         break;
     case 0x20:/*LB*/    //r[rt]=(signed char)mem_read(s,1,ptr,1);  break;
