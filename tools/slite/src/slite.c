@@ -40,6 +40,7 @@
 * IMPORTANT: Assumes host is little endian and target is big endian.
 *-----------------------------------------------------------------------------*/
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -127,8 +128,8 @@ t_map memory_maps[NUM_MEM_MAPS] = {
         {/* Bootstrap BRAM, read only */
         {VECTOR_RESET,  0x00001000, 0xf8000000, 1, NULL, "Boot BRAM"},
         /* main external ram block  */
-        {0x80000000,    0x00200000, 0xf8000000, 0, NULL, "XRAM0"},
-        {0x00000000,    0x00400000, 0xf8000000, 0, NULL, "XRAM1"},
+        {0x80000000,    0x00800000, 0xf8000000, 0, NULL, "XRAM0"},
+        {0x00000000,    0x00800000, 0xf8000000, 0, NULL, "XRAM1"},
         /* external flash block */
         {0xb0000000,    0x00100000, 0xf8000000, 0, NULL, "Flash"},
         }
@@ -169,6 +170,8 @@ t_map memory_maps[NUM_MEM_MAPS] = {
 typedef struct s_args {
     /** !=0 to trap on unimplemented opcodes, 0 to print warning and NOP */
     uint32_t trap_on_reserved;
+    /** !=0 to emulate some common mips32 opcodes */
+    uint32_t emulate_some_mips32;
     /** address to start execution from (by default, reset vector) */
     uint32_t start_addr;
     /** memory map to be used */
@@ -186,6 +189,8 @@ typedef struct s_args {
     char *log_file_name;
     /** bin file to load to each area or null */
     char *bin_filename[NUM_MEM_BLOCKS];
+    /** map file to be used for function call tracing, if any */
+    char *map_filename;
     /** offset into area (in bytes) where bin wile will be loaded */
     uint32_t offset[NUM_MEM_BLOCKS];
 } t_args;
@@ -264,9 +269,10 @@ void slite_sleep(unsigned int value){
 /* FIXME Refactor HW system params */
 
 #define DBG_REGS          (0x20010000)
+#define UART_WRITE        (0x20000000)
+#define UART_READ         (0x20000000)
 
-#define UART_WRITE        0x20000000
-#define UART_READ         0x20000000
+/* FIXME The following addresses are remnants of Plasma to be removed */
 #define IRQ_MASK          0x20000010
 #define IRQ_STATUS        0x20000020
 #define CONFIG_REG        0x20000070
@@ -322,10 +328,10 @@ typedef struct s_state {
    unsigned int hi;
    unsigned int lo;
    int status;
+   int32_t trap_cause;          /**< temporary trap code or <0 if no trap */
    unsigned cp0_cause;
    int userMode;                /**< DEPRECATED, to be removed */
    int processId;               /**< DEPRECATED, to be removed */
-   int exceptionId;             /**< DEPRECATED, to be removed */
    int faultAddr;               /**< DEPRECATED, to be removed */
    int irqStatus;               /**< DEPRECATED, to be removed */
    int skip;
@@ -346,7 +352,7 @@ static char *opcode_string[]={
    "0SPECIAL","0REGIMM","1J","1JAL","2BEQ","2BNE","3BLEZ","3BGTZ",
    "5ADDI","5ADDIU","5SLTI","5SLTIU","5ANDI","5ORI","5XORI","6LUI",
    "cCOP0","cCOP1","cCOP2","cCOP3","2BEQL","2BNEL","3BLEZL","3BGTZL",
-   "0?","0?","0?","0?","0?","0?","0?","0?",
+   "0?","0?","0?","0?","0SPECIAL2","0?","0?","0SPECIAL3",
    "8LB","8LH","8LWL","8LW","8LBU","8LHU","8LWR","0?",
    "8SB","8SH","8SWL","8SW","0?","0?","8SWR","0CACHE",
    "0LL","0LWC1","0LWC2","0LWC3","?","0LDC1","0LDC2","0LDC3"
@@ -370,8 +376,36 @@ static char *regimm_string[]={
    "9BLTZAL","9BEQZAL","9BLTZALL","9BGEZALL","0?","0?","0?","0?",
    "0?","0?","0?","0?","0?","0?","0?","0?"
 };
+/*
+static char *special2_string[]={
+    "0MADD","0MADDU","0MUL","0?",  "0?","0?","0?","0?",
+    "0?","0?","0?","0?",  "0?","0?","0?","0?",
+    "0?","0?","0?","0?",  "0?","0?","0?","0?",
+    "0?","0?","0?","0?",  "0?","0?","0?","0?",
 
+    "0CLZ","0CLO","0?","0?",  "0?","0?","0?","0?",
+    "0?","0?","0?","0?",  "0?","0?","0?","0?",
+    "0?","0?","0?","0?",  "0?","0?","0?","0?",
+    "0?","0?","0?","0?",  "0?","0?","0?","0?",
+};
+*/
+
+/** local memory used by the console simulation code */
 static unsigned int HWMemory[8];
+
+#define MAP_MAX_FUNCTIONS  (400)
+#define MAP_MAX_NAME_LEN   (80)
+
+/** Information extracted from the map file, if any */
+typedef struct {
+    uint32_t num_functions;         /**< number of functions in the table */
+    FILE *log;                      /**< text log file or stdout */
+    char *log_filename;             /**< name of log file or NULL */
+    uint32_t fn_address[MAP_MAX_FUNCTIONS];
+    char fn_name[MAP_MAX_FUNCTIONS][MAP_MAX_NAME_LEN];
+} t_map_info;
+
+t_map_info map_info;
 
 /*---- Local function prototypes ---------------------------------------------*/
 
@@ -379,12 +413,17 @@ static unsigned int HWMemory[8];
 void init_trace_buffer(t_state *s, t_args *args);
 void close_trace_buffer(t_state *s);
 void dump_trace_buffer(t_state *s);
-void log_cycle(t_state *s);
+uint32_t log_cycle(t_state *s);
 void log_read(t_state *s, int full_address, int word_value, int size, int log);
 void log_failed_assertions(t_state *s);
 uint32_t log_enabled(t_state *s);
 void trigger_log(t_state *s);
 void print_opcode_fields(uint32_t opcode);
+void reserved_opcode(uint32_t pc, uint32_t opcode, t_state* s);
+int32_t read_map_file(char *filename, t_map_info* map);
+void log_call(uint32_t to, uint32_t from);
+void log_ret(uint32_t to, uint32_t from);
+int32_t function_index(uint32_t address);
 
 int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args);
 void usage(void);
@@ -403,6 +442,66 @@ void start_load(t_state *s, uint32_t addr, int rt, int data);
 
 
 /*---- Local functions -------------------------------------------------------*/
+
+/*---- Call & ret tracing (EARLY DRAFT) --------------------------------------*/
+
+static uint32_t call_depth = 0;
+
+void log_ret(uint32_t to, uint32_t from){
+    int32_t i,j;
+
+    /* If no map file has been loaded, skip trace */
+    if((!map_info.num_functions) || (!map_info.log)) return;
+
+    if(call_depth>0){
+        fprintf(map_info.log, "[%08x]  ", from);
+        for(j=0;j<call_depth;j++){
+            fprintf(map_info.log, ". ");
+        }
+        fprintf(map_info.log, "}\n");
+        call_depth--;
+    }
+    else{
+        i = function_index(to);
+        if(i>=0){
+            fprintf(map_info.log, "[%08x]  %s\n", from, map_info.fn_name[i]);
+        }
+        else{
+            fprintf(map_info.log, "[%08x]  %08x\n", from, to);
+        }
+    }
+}
+
+/** */
+void log_call(uint32_t to, uint32_t from){
+    int32_t i,j;
+
+    /* If no map file has been loaded, skip trace */
+    if((!map_info.num_functions) || (!map_info.log)) return;
+
+    i = function_index(to);
+    if(i>=0){
+        call_depth++;
+        fprintf(map_info.log, "[%08x]  ", from);
+        for(j=0;j<call_depth;j++){
+            fprintf(map_info.log, ". ");
+        }
+        fprintf(map_info.log, "%s{\n", map_info.fn_name[i]);
+    }
+}
+
+int32_t function_index(uint32_t address){
+    uint32_t i;
+
+    for(i=0;i<map_info.num_functions;i++){
+        if(address==map_info.fn_address[i]){
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*---- Execution log ---------------------------------------------------------*/
 
 /** Log to file a memory read operation (not including target reg change) */
 void log_read(t_state *s, int full_address, int word_value, int size, int log){
@@ -462,6 +561,7 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
         /* address out of mapped blocks: log and return zero */
         /* if bit CP0.16==1, this is a D-Cache line invalidation access and
            the HW will not read any actual data, so skip the log (@note1) */
+        printf("MEM RD ERROR @ 0x%08x [0x%08x]\n", s->pc, full_address);
         if(log_enabled(s) && log!=0 && !(s->status & (1<<16))){
             fprintf(s->t.log, "(%08X) [%08X] <**>=%08X RD UNMAPPED\n",
                 s->pc, full_address, 0);
@@ -566,8 +666,10 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
                 s->op_addr, address, mask, dvalue);
     }
 
-    if((address&0xffff0000)==DBG_REGS){
-        printf("[%04x]=%08x\n", address & 0xffff, value);
+    /* Print anything that's written to a debug register, otherwise ignore it */
+    if((address&0xffff0000)==(DBG_REGS&0xffff0000)){
+        printf("DEBUG REG[%04x]=%08x\n", address & 0xffff, value);
+        return;
     }
 
     switch(address){
@@ -608,6 +710,7 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
     }
     if(!ptr){
         /* address out of mapped blocks: log and return zero */
+        printf("MEM WR ERROR @ 0x%08x [0x%08x]\n", s->pc, address);
         if(log_enabled(s) && log!=0){
             fprintf(s->t.log, "(%08X) [%08X] |%02X|=%08X WR UNMAPPED\n",
                 s->op_addr, address, mask, dvalue);
@@ -719,6 +822,55 @@ void mem_lwl(t_state *s, uint32_t address, uint32_t reg_index, uint32_t log){
     s->r[reg_index] = (s->r[reg_index] & (~mask[offset])) | data;
 }
 
+/*---- Optional MIPS32 opcodes -----------------------------------------------*/
+
+uint32_t count_leading(uint32_t lead, uint32_t src){
+    uint32_t mask, bit_val, i;
+
+    mask = 0x80000000;
+    bit_val = lead? mask : 0x0;
+
+    for(i=0;i<32;i++){
+        if((src & mask) != bit_val){
+            return i;
+        }
+        mask = mask >> 1;
+    }
+
+    return i;
+}
+
+uint32_t mult_gpr(uint32_t m1, uint32_t m2){
+    uint32_t temp;
+
+    temp = m1 * m2;
+    return temp;
+}
+
+uint32_t ext_bitfield(uint32_t src, uint32_t opcode){
+    uint32_t pos, size, mask, value;
+
+    pos = (opcode>>6) & 0x1f;
+    size = ((opcode>>11) & 0x1f) + 1;
+    mask = (1 << size)-1;
+    mask = mask << pos;
+
+    value = (src & mask) >> pos;
+    return value;
+}
+
+uint32_t ins_bitfield(uint32_t target, uint32_t src, uint32_t opcode){
+    uint32_t pos, size, mask, value;
+
+    pos = (opcode>>6) & 0x1f;
+    size = ((opcode>>11) & 0x1f) + 1;
+    mask = (1 << size)-1;
+    mask = mask << pos;
+
+    value = target & (~mask);
+    value |= ((src << pos) & mask);
+    return value;
+}
 
 /*---- Optional MMU and cache implementation ---------------------------------*/
 
@@ -790,8 +942,8 @@ void cycle(t_state *s, int show_mode){
     unsigned int opcode;
     int delay_slot = 0; /* 1 of this instruction is a branch */
     unsigned int op, rs, rt, rd, re, func, imm, target;
-    int trap_cause = 0;
     int imm_shift, branch=0, lbranch=2, skip2=0;
+    int link=0; /* !=0 if this is a 'branch-and-link' opcode */
     int *r=s->r;
     unsigned int *u=(unsigned int*)s->r;
     unsigned int ptr, epc, rSave;
@@ -800,8 +952,11 @@ void cycle(t_state *s, int show_mode){
     uint32_t target_offset16;
     uint32_t target_long;
 
+    s->trap_cause = -1;
+
     /* fetch and decode instruction */
     opcode = mem_read(s, 4, s->pc, 0);
+
     op = (opcode >> 26) & 0x3f;
     rs = (opcode >> 21) & 0x1f;
     rt = (opcode >> 16) & 0x1f;
@@ -845,7 +1000,7 @@ void cycle(t_state *s, int show_mode){
                 aux = op&0x03;
                 switch(rs){
                     case 16:
-                        /* FIXME partial decoding */
+                        /* FIXME partial decoding of some COP0 opcodes */
                         printf("  RFE      "); format = ' '; break;
                     case 4:
                         printf("  MTC%1d   ", aux); break;
@@ -948,22 +1103,22 @@ void cycle(t_state *s, int show_mode){
         case 0x04:/*SLLV*/ r[rd]=r[rt]<<r[rs];       break;
         case 0x06:/*SRLV*/ r[rd]=u[rt]>>r[rs];       break;
         case 0x07:/*SRAV*/ r[rd]=r[rt]>>r[rs];       break;
-        case 0x08:/*JR*/   delay_slot=1;
+        case 0x08:/*JR*/   if(rs==31) log_ret(r[rs],epc);
+                           delay_slot=1;
                            s->pc_next=r[rs];         break;
         case 0x09:/*JALR*/ delay_slot=1;
                            r[rd]=s->pc_next;
-                           s->pc_next=r[rs]; break;
+                           s->pc_next=r[rs];
+                           log_call(s->pc_next, epc); break;
         case 0x0a:/*MOVZ*/ if(!r[rt]) r[rd]=r[rs];   break;  /*IV*/
         case 0x0b:/*MOVN*/ if(r[rt]) r[rd]=r[rs];    break;  /*IV*/
-        case 0x0c:/*SYSCALL*/ trap_cause = 8;
-                              s->exceptionId=1;
+        case 0x0c:/*SYSCALL*/ s->trap_cause = 8;
                               /*
                               FIXME enable when running uClinux
                               printf("SYSCALL (%08x)\n", s->pc);
                               */
                               break;
-        case 0x0d:/*BREAK*/   trap_cause = 9;
-                              s->exceptionId=1;
+        case 0x0d:/*BREAK*/   s->trap_cause = 9;
                               /*
                               FIXME enable when running uClinux
                               printf("BREAK (%08x)\n", s->pc);
@@ -994,25 +1149,24 @@ void cycle(t_state *s, int show_mode){
         case 0x33:/*TLTU*/ break;
         case 0x34:/*TEQ*/  break;
         case 0x36:/*TNE*/  break;
-        default: printf("ERROR0(*0x%x~0x%x)\n", s->pc, opcode);
-            /* FIXME should trap unknown opcode */
-            s->wakeup=1;
+        default:
+            reserved_opcode(epc, opcode, s);
         }
         break;
     case 0x01:/*REGIMM*/
         switch(rt){
-            case 0x10:/*BLTZAL*/ r[31]=s->pc_next;
+            case 0x10:/*BLTZAL*/ r[31]=s->pc_next; link=1;
             case 0x00:/*BLTZ*/   branch=r[rs]<0;    break;
-            case 0x11:/*BGEZAL*/ r[31]=s->pc_next;
+            case 0x11:/*BGEZAL*/ r[31]=s->pc_next; link=1;
             case 0x01:/*BGEZ*/   branch=r[rs]>=0;   break;
-            case 0x12:/*BLTZALL*/r[31]=s->pc_next;
+            case 0x12:/*BLTZALL*/r[31]=s->pc_next; link=1;
             case 0x02:/*BLTZL*/  lbranch=r[rs]<0;   break;
-            case 0x13:/*BGEZALL*/r[31]=s->pc_next;
+            case 0x13:/*BGEZALL*/r[31]=s->pc_next; link=1;
             case 0x03:/*BGEZL*/  lbranch=r[rs]>=0;  break;
             default: printf("ERROR1\n"); s->wakeup=1;
         }
         break;
-    case 0x03:/*JAL*/    r[31]=s->pc_next;
+    case 0x03:/*JAL*/    r[31]=s->pc_next; log_call(((s->pc&0xf0000000)|target), epc);
     case 0x02:/*J*/      delay_slot=1;
                        s->pc_next=(s->pc&0xf0000000)|target; break;
     case 0x04:/*BEQ*/    branch=r[rs]==r[rt];     break;
@@ -1037,6 +1191,7 @@ void cycle(t_state *s, int show_mode){
                     case 14: r[rt]=s->epc; break;
                     case 15: r[rt]=R3000_ID; break;
                     default:
+                        printf("mfc0 [%02d] @ [0x%08x]\n", rt, s->pc);
                         break;
                 }
             }
@@ -1052,26 +1207,16 @@ void cycle(t_state *s, int show_mode){
                     printf("mtc0 [%2d]=0x%08x @ [0x%08x] IGNORED\n",
                            rd, r[rt], epc);
                 }
-                /* FIXME remove remnants of Plasma MMU simulation */
-                /*
-                if(s->processId && (r[rt]&2)){
-                    s->userMode|=r[rt]&2;
-                    //printf("CpuStatus=%d %d %d\n", r[rt], s->status, s->userMode);
-                    //s->wakeup = 1;
-                    //printf("pc=0x%x\n", epc);
-                }
-                */
             }
         }
         else{
             /* tried to execute mtc* or mfc* in user mode: trap */
-            printf("COP0 UNAVAILABLE address=0x%08x opcode=0x%x -- ",
-                   epc, opcode);
+            printf("COP0 UNAVAILABLE [0x%08x] = 0x%x %c -- ",
+                   epc, opcode, (s->delay_slot? 'D':' '));
             print_opcode_fields(opcode);
             printf("\n");
 
-            trap_cause = 11; /* unavailable coprocessor */
-            s->exceptionId=1;
+            s->trap_cause = 11; /* unavailable coprocessor */
         }
         break;
     case 0x11:/*COP1*/  unimplemented(s,"COP1");
@@ -1082,7 +1227,31 @@ void cycle(t_state *s, int show_mode){
     case 0x15:/*BNEL*/  lbranch=r[rs]!=r[rt];    break;
     case 0x16:/*BLEZL*/ lbranch=r[rs]<=0;        break;
     case 0x17:/*BGTZL*/ lbranch=r[rs]>0;         break;
-//      case 0x1c:/*MAD*/  break;   /*IV*/
+    case 0x1c:/*SPECIAL2*/
+        /* MIPS32 opcodes, some of which may be emulated */
+        if(cmd_line_args.emulate_some_mips32){
+            switch(func){
+                case 0x20: /* CLZ */ r[rt] = count_leading(0, r[rs]); break;
+                case 0x21: /* CLO */ r[rt] = count_leading(1, r[rs]); break;
+                case 0x02: /* MUL */ r[rd] = mult_gpr(r[rs], r[rt]); break;
+                default:
+                    reserved_opcode(epc, opcode, s);
+            }
+        }
+        else{
+            reserved_opcode(epc, opcode, s);
+        }
+        break;
+    case 0x1f: /* SPECIAL3 */
+        if(cmd_line_args.emulate_some_mips32){
+            switch(func){
+                case 0x00: /* EXT */ r[rt] = ext_bitfield(r[rs], opcode); break;
+                case 0x04: /* INS */ r[rt] = ins_bitfield(r[rt], r[rs], opcode); break;
+                default:
+                    reserved_opcode(epc, opcode, s);
+            }
+        }
+        break;
     case 0x20:/*LB*/    //r[rt]=(signed char)mem_read(s,1,ptr,1);  break;
                         start_load(s, ptr, rt,(signed char)mem_read(s,1,ptr,1));
                         break;
@@ -1134,16 +1303,12 @@ void cycle(t_state *s, int show_mode){
 //      case 0x3e:/*SDC2*/ break;
 //      case 0x3f:/*SDC3*/ break;
     default:  /* unimplemented opcode */
-        if(cmd_line_args.trap_on_reserved){
-            trap_cause = 10; /* reserved instruction */
-            s->exceptionId=1;
-        }
-        else{
-            printf("RESERVED OPCODE address=0x%08x opcode=0x%x -- ",
-                   epc, opcode);
-            print_opcode_fields(opcode);
-            printf("\n");
-        }
+        reserved_opcode(epc, opcode, s);
+    }
+
+    /* */
+    if((branch || lbranch == 1) && link){
+        log_call(s->pc_next + imm_shift, epc);
     }
 
     /* adjust next PC if this was a a jump instruction */
@@ -1161,10 +1326,10 @@ void cycle(t_state *s, int show_mode){
     /* load delay slots not simulated */
 
     /* Handle exceptions */
-   if(s->exceptionId){
+   if(s->trap_cause>=0){
         r[rt] = rSave;
         /* set cause field ... */
-        s->cp0_cause = (s->delay_slot & 0x1) << 31 | (trap_cause & 0x1f) << 2;
+        s->cp0_cause = (s->delay_slot & 0x1) << 31 | (s->trap_cause & 0x1f) << 2;
         /* ...save previous KU/IE flags in SR... */
         s->status = (s->status & 0xffffffc3) | ((s->status & 0x0f) << 2);
         /* ...and raise KU(EXL) kernel mode flag */
@@ -1176,14 +1341,13 @@ void cycle(t_state *s, int show_mode){
         s->epc = epc;
         s->pc_next = VECTOR_TRAP;
         s->skip = 1;
-        s->exceptionId = 0;
         s->userMode = 0;
         //s->wakeup = 1;
     }
 
     /* if we're NOT showing output to console, log state of CPU to file */
     if(!show_mode){
-        log_cycle(s);
+        s->wakeup |= log_cycle(s);
     }
 
 
@@ -1210,6 +1374,19 @@ void print_opcode_fields(uint32_t opcode){
     printf("%02x:", field);
     field = (opcode >>  0)&0x3f;
     printf("%02x",  field);
+}
+
+/** Deal with reserved, unimplemented opcodes. Updates s->trap_cause. */
+void reserved_opcode(uint32_t pc, uint32_t opcode, t_state* s){
+    if(cmd_line_args.trap_on_reserved){
+        s->trap_cause = 10; /* reserved instruction */
+    }
+    else{
+        printf("RESERVED OPCODE [0x%08x] = 0x%08x %c -- ",
+                pc, opcode, (s->delay_slot? 'D':' '));
+        print_opcode_fields(opcode);
+        printf("\n");
+    }
 }
 
 
@@ -1389,6 +1566,18 @@ int read_binary_files(t_state *s, t_args *args){
     uint8_t *target;
     uint32_t bytes=0, i, files_read=0;
 
+    /* read map file if requested */
+    if(args->map_filename!=NULL){
+        if(read_map_file(args->map_filename, &map_info)<0){
+            printf("Trouble reading map file '%s', quitting!\n",
+                   args->map_filename);
+            return 1;
+        }
+        printf("Read %d functions from the map file; call trace enabled.\n\n",
+               map_info.num_functions);
+    }
+
+    /* read object code binaries */
     for(i=0;i<NUM_MEM_BLOCKS;i++){
         bytes = 0;
         if(args->bin_filename[i]!=NULL){
@@ -1418,7 +1607,7 @@ int read_binary_files(t_state *s, t_args *args){
 
             /* Now reverse the endianness of the data we just read, if it's
              necessary. */
-             /* FIXME add cmd line param, etc. */
+             /* FIXME handle little-endian stuff (?) */
             //reverse_endianess(target, bytes);
 
             files_read++;
@@ -1459,6 +1648,8 @@ void reverse_endianess(uint8_t *data, uint32_t bytes){
 int main(int argc,char *argv[]){
     t_state state, *s=&state;
 
+
+
     /* Parse command line and pass any relevant arguments to CPU record */
     if(parse_cmd_line(argc,argv, &cmd_line_args)==0){
         return 0;
@@ -1486,8 +1677,8 @@ int main(int argc,char *argv[]){
     reset_cpu(s);
 
     /* Simulate the work of the uClinux bootloader */
-    if(cmd_line_args.memory_map == MAP_UCLINUX){
-        /* FIXME this is a stub, flesh it out */
+    if(cmd_line_args.memory_map == MAP_UCLINUX_BRAM){
+        /* FIXME this 'bootloader' is a stub, flesh it out */
         s->pc = 0x80002400;
     }
 
@@ -1512,6 +1703,7 @@ void init_trace_buffer(t_state *s, t_args *args){
 #if FILE_LOGGING_DISABLED
     s->t.log = NULL;
     s->t.log_triggered = 0;
+    map_info.log = NULL;
     return;
 #else
     /* clear trace buffer */
@@ -1535,6 +1727,15 @@ void init_trace_buffer(t_state *s, t_args *args){
     /* Setup log trigger */
     s->t.log_triggered = 0;
     s->t.log_trigger_address = args->log_trigger_address;
+
+    /* if file logging of function calls is enabled, open log file */
+    if(map_info.log_filename!=NULL){
+        map_info.log = fopen(map_info.log_filename, "w");
+        if(map_info.log==NULL){
+            printf("Error opening log file '%s', file logging disabled\n",
+                    map_info.log_filename);
+        }
+    }
 #endif
 }
 
@@ -1551,7 +1752,7 @@ void dump_trace_buffer(t_state *s){
 }
 
 /** Logs last cycle's activity (changes in state and/or loads/stores) */
-void log_cycle(t_state *s){
+uint32_t log_cycle(t_state *s){
     static unsigned int last_pc = 0;
     int i;
     uint32_t log_pc;
@@ -1562,10 +1763,11 @@ void log_cycle(t_state *s){
         s->t.next = (s->t.next + 1) % TRACE_BUFFER_SIZE;
     }
     last_pc = s->pc;
+    log_pc = s->op_addr;
+
 
     /* if file logging is enabled, dump a trace log to file */
     if(log_enabled(s)){
-        log_pc = s->op_addr;
 
         /* skip register zero which does not change */
         for(i=1;i<32;i++){
@@ -1590,17 +1792,32 @@ void log_cycle(t_state *s){
         }
         s->t.epc = s->epc;
 
-        if(s->status != s->t. status){
+        if(s->status != s->t.status){
             fprintf(s->t.log, "(%08X) [SR]=%08X\n", log_pc, s->status);
         }
         s->t.status = s->status;
     }
+
+#if 0
+    /* FIXME Try to detect a code crash by looking at SP */
+    if(1){
+            if((s->r[29]&0xffff0000) == 0xffff00000){
+                printf("SP derailed! @ 0x%08x [0x%08x]\n", log_pc, s->r[29]);
+                return 1;
+            }
+    }
+#endif
+
+    return 0;
 }
 
 /** Frees debug buffers and closes log file */
 void close_trace_buffer(t_state *s){
     if(s->t.log){
         fclose(s->t.log);
+    }
+    if(map_info.log){
+        fclose(map_info.log);
     }
 }
 
@@ -1640,6 +1857,55 @@ void trigger_log(t_state *s){
     s->t.epc = s->epc;
 }
 
+int32_t read_map_file(char *filename, t_map_info* map){
+    FILE *f;
+    uint32_t address, i;
+    uint32_t segment_text = 0;
+    char line[256];
+    char name[256];
+
+    f = fopen (filename, "rt");  /* open the file for reading */
+
+    if(!f){
+        return -1;
+    }
+
+   while(fgets(line, sizeof(line)-1, f) != NULL){
+       if(!strncmp(line, ".text", 5)){
+           segment_text = 1;
+       }
+       else if(line[0]==' ' && segment_text){
+            /* may be a function address */
+            for(i=0;(i<sizeof(line)-1) && (line[i]==' '); i++);
+            if(line[i]=='0'){
+                sscanf(line, "%*[ \n\t]%x%*[ \n\t]%s", &address, &(name[0]));
+
+                strncpy(map->fn_name[map->num_functions],
+                        name, MAP_MAX_NAME_LEN-1);
+                map->fn_address[map->num_functions] = address;
+                map->num_functions++;
+                if(map->num_functions >= MAP_MAX_FUNCTIONS){
+                    printf("WARNING: too many functions in map file!\n");
+                    return map->num_functions;
+                }
+            }
+       }
+       else if(line[0]=='.' && segment_text){
+           break;
+       }
+    }
+    fclose(f);
+
+#if 0
+    for(i=0;i<map->num_functions;i++){
+        printf("--> %08x %s\n", map->fn_address[i], map->fn_name[i]);
+    }
+#endif
+
+    return map->num_functions;
+}
+
+
 void free_cpu(t_state *s){
     int i;
 
@@ -1658,8 +1924,8 @@ void reset_cpu(t_state *s){
     s->t.status = s->status;
 }
 
+/* FIXME redundant function, merge with reserved_opcode */
 void unimplemented(t_state *s, const char *txt){
-    /* FIXME unimplemented opcode trap */
     printf("UNIMPLEMENTED: %s\n", txt);
 }
 
@@ -1697,15 +1963,22 @@ int init_cpu(t_state *s, t_args *args){
 int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
     uint32_t i;
 
+    /* Initialize logging parameters */
+    map_info.num_functions = 0;
+    map_info.log_filename = NULL;
+    map_info.log = stdout;
+
     /* fill cmd line args with default values */
     args->memory_map = MAP_DEFAULT;
     args->trap_on_reserved = 1;
+    args->emulate_some_mips32 = 1;
     args->start_addr = VECTOR_RESET;
     args->do_unaligned = 0;
     args->no_prompt = 0;
     args->breakpoint = 0xffffffff;
     args->log_file_name = "sw_sim_log.txt";
     args->log_trigger_address = VECTOR_RESET;
+    args->map_filename = NULL;
     for(i=0;i<NUM_MEM_BLOCKS;i++){
         args->bin_filename[i] = NULL;
         args->offset[i] = 0;
@@ -1719,7 +1992,7 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
             return 0;
         }
         else if(strcmp(argv[i],"--uclinux")==0){
-            args->memory_map = MAP_UCLINUX;
+            args->memory_map = MAP_UCLINUX_BRAM;
             /* FIXME selecting uClinux enables unaligned L/S emulation */
             args->do_unaligned = 1;
         }
@@ -1735,6 +2008,9 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
         else if(strcmp(argv[i],"--notrap10")==0){
             args->trap_on_reserved = 0;
         }
+        else if(strcmp(argv[i],"--nomips32")==0){
+            args->emulate_some_mips32 = 0;
+        }
         else if(strncmp(argv[i],"--bram=", strlen("--bram="))==0){
             args->bin_filename[0] = &(argv[i][strlen("--bram=")]);
         }
@@ -1743,6 +2019,12 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
         }
         else if(strncmp(argv[i],"--xram=", strlen("--xram="))==0){
             args->bin_filename[1] = &(argv[i][strlen("--xram=")]);
+        }
+        else if(strncmp(argv[i],"--map=", strlen("--map="))==0){
+            args->map_filename = &(argv[i][strlen("--map=")]);
+        }
+        else if(strncmp(argv[i],"--trace_log=", strlen("--trace_log="))==0){
+            map_info.log_filename = &(argv[i][strlen("--trace_log=")]);
         }
         else if(strncmp(argv[i],"--start=", strlen("--start="))==0){
             sscanf(&(argv[i][strlen("--start=")]), "%x", &(args->start_addr));
@@ -1784,10 +2066,13 @@ void usage(void){
     printf("--kernel=<file name>    : XRAM initialization file for uClinux kernel\n");
     printf("                          (loads at block offset 0x2000)\n");
     printf("--flash=<file name>     : FLASH initialization file\n");
+    printf("--map=<file name>       : Map file to be used for tracing, if any\n");
+    printf("--trace_log=<file name> : Log file used for tracing, if any\n");
     printf("--trigger=<hex number>  : Log trigger address\n");
     printf("--break=<hex number>    : Breakpoint address\n");
     printf("--start=<hex number>    : Start here instead of at reset vector\n");
     printf("--notrap10              : Reserverd opcodes are NOPs and don't trap\n");
+    printf("--nomips32              : Do not emulate any mips32 opcodes\n");
     printf("--plasma                : Simulate Plasma instead of MIPS-I\n");
     printf("--uclinux               : Use memory map tailored to uClinux\n");
     printf("--unaligned             : Implement unaligned load/store instructions\n");
