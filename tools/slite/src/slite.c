@@ -51,6 +51,9 @@
 /** CPU identification code (contents of register CP0[15], PRId */
 #define R3000_ID (0x00000200)
 
+/** Number of hardware interrupt inputs (irq0 is NMI) */
+#define NUM_HW_IRQS (8)
+
 /** Set to !=0 to disable file logging (much faster simulation) */
 /* alternately you can just set an unreachable log trigger address */
 #define FILE_LOGGING_DISABLED (0)
@@ -302,6 +305,7 @@ char *assertion_messages[2] = {
 /** Length of debugging jump target queue */
 #define TRACE_BUFFER_SIZE (32)
 
+/** Assorted debug & trace info */
 typedef struct s_trace {
    unsigned int buf[TRACE_BUFFER_SIZE];   /**< queue of last jump targets */
    unsigned int next;                     /**< internal queue head pointer */
@@ -311,6 +315,8 @@ typedef struct s_trace {
    int pr[32];                            /**< last value of register bank */
    int hi, lo, epc, status;               /**< last value of internal regs */
    int disasm_ptr;                        /**< disassembly pointer */
+   /** Cycles remaining to trigger irq[i], or -1 if irq inactive */
+   int32_t irq_trigger_countdown[NUM_HW_IRQS];  /**< (in instructions) */
 } t_trace;
 
 typedef struct s_state {
@@ -320,6 +326,7 @@ typedef struct s_state {
    uint32_t breakpoint;                   /**< BP address of 0xffffffff */
 
    int delay_slot;              /**< !=0 if prev. instruction was a branch */
+   uint32_t instruction_ctr;    /**< # of instructions executed since reset */
 
    int r[32];
    int opcode;
@@ -438,7 +445,9 @@ void reverse_endianess(uint8_t *data, uint32_t bytes);
 /* Hardware simulation */
 int mem_read(t_state *s, int size, unsigned int address, int log);
 void mem_write(t_state *s, int size, unsigned address, unsigned value, int log);
+void debug_reg_write(t_state *s, uint32_t address, uint32_t data);
 void start_load(t_state *s, uint32_t addr, int rt, int data);
+uint32_t simulate_hw_irqs(t_state *s);
 
 
 /*---- Local functions -------------------------------------------------------*/
@@ -616,7 +625,13 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     return(value);
 }
 
-/** Write memory */
+/** Write to debug register */
+void debug_reg_write(t_state *s, uint32_t address, uint32_t data){
+
+    printf("DEBUG REG[%04x]=%08x\n", address & 0xffff, data);
+}
+
+/** Write to memory, including simulated i/o */
 void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
     unsigned int i, ptr, mask, dvalue, b0, b1, b2, b3;
 
@@ -668,7 +683,7 @@ void mem_write(t_state *s, int size, unsigned address, unsigned value, int log){
 
     /* Print anything that's written to a debug register, otherwise ignore it */
     if((address&0xffff0000)==(DBG_REGS&0xffff0000)){
-        printf("DEBUG REG[%04x]=%08x\n", address & 0xffff, value);
+        debug_reg_write(s, address, value);
         return;
     }
 
@@ -828,10 +843,10 @@ uint32_t count_leading(uint32_t lead, uint32_t src){
     uint32_t mask, bit_val, i;
 
     mask = 0x80000000;
-    bit_val = lead? mask : 0x0;
+    bit_val = lead? 0xffffffff : 0x00000000;
 
     for(i=0;i<32;i++){
-        if((src & mask) != bit_val){
+        if((src & mask) != (bit_val & mask)){
             return i;
         }
         mask = mask >> 1;
@@ -937,6 +952,49 @@ void start_load(t_state *s, uint32_t addr, int rt, int data){
     s->r[rt] = data;
 }
 
+void process_traps(t_state *s, uint32_t epc, uint32_t rSave, uint32_t rt){
+    int32_t i, cause= -1;
+
+    if(s->trap_cause>=0){
+        /* If there is a software-triggered trap pending, deal with it */
+        cause = s->trap_cause;
+    }
+    else{
+        /* If there's any hardware interrupt pending, deal with it */
+        for(i=0;i<NUM_HW_IRQS;i++){
+            if(s->t.irq_trigger_countdown[i]==0){
+                /* trigger interrupt i */
+                /* FIXME handle irq mask(s) in SR */
+                cause = 0; /* cause = hardware interrupt */
+                s->t.irq_trigger_countdown[i]--;
+            }
+            else if (s->t.irq_trigger_countdown[i]>0){
+                s->t.irq_trigger_countdown[i]--;
+            }
+        }
+    }
+
+    /* Now, whatever the cause was, do the trap handling */
+    if(cause >= 0){
+        s->trap_cause = cause;
+        s->r[rt] = rSave; /* 'undo' current instruction (?) */
+        /* set cause field ... */
+        s->cp0_cause = (s->delay_slot & 0x1) << 31 | (s->trap_cause & 0x1f) << 2;
+        /* ...save previous KU/IE flags in SR... */
+        s->status = (s->status & 0xffffffc3) | ((s->status & 0x0f) << 2);
+        /* ...and raise KU(EXL) kernel mode flag */
+        s->status |= 0x02;
+        /* adjust epc if we (i.e. the victim instruction) are in a delay slot */
+        if(s->delay_slot){
+            epc = epc - 4;
+        }
+        s->epc = epc;
+        s->pc_next = VECTOR_TRAP;
+        s->skip = 1;
+        s->userMode = 0;
+    }
+}
+
 /** Execute one cycle of the CPU (including any interlock stall cycles) */
 void cycle(t_state *s, int show_mode){
     unsigned int opcode;
@@ -952,6 +1010,7 @@ void cycle(t_state *s, int show_mode){
     uint32_t target_offset16;
     uint32_t target_long;
 
+    s->instruction_ctr++;
     s->trap_cause = -1;
 
     /* fetch and decode instruction */
@@ -1114,7 +1173,7 @@ void cycle(t_state *s, int show_mode){
         case 0x0b:/*MOVN*/ if(r[rt]) r[rd]=r[rs];    break;  /*IV*/
         case 0x0c:/*SYSCALL*/ s->trap_cause = 8;
                               /*
-                              FIXME enable when running uClinux
+                              //FIXME enable when running uClinux
                               printf("SYSCALL (%08x)\n", s->pc);
                               */
                               break;
@@ -1183,15 +1242,19 @@ void cycle(t_state *s, int show_mode){
     case 0x0f:/*LUI*/    r[rt]=(imm<<16);         break;
     case 0x10:/*COP0*/
         if(s->status & 0x02){ /* kernel mode? */
-            if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
-                //printf("mfc0: [SR]=0x%08x @ [0x%08x]\n", s->status, epc);
+            if(opcode==0x42000010){  // rfe
+                /* FIXME unimplemented yet */
+            }
+            else if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
+                //printf("mfc0: [%02d]=0x%08x @ [0x%08x]\n", rd, s->status, epc);
                 switch(rd){
                     case 12: r[rt]=s->status & 0x0000003f; break;
                     case 13: r[rt]=s->cp0_cause; break;
                     case 14: r[rt]=s->epc; break;
                     case 15: r[rt]=R3000_ID; break;
                     default:
-                        printf("mfc0 [%02d] @ [0x%08x]\n", rt, s->pc);
+                        /* FIXME log access to unimplemented CP0 register */
+                        printf("mfc0 [%02d]->%02d @ [0x%08x]\n", rd, rt,s->pc);
                         break;
                 }
             }
@@ -1325,32 +1388,15 @@ void cycle(t_state *s, int show_mode){
     /* if there's a delayed load pending, do it now: load reg with memory data*/
     /* load delay slots not simulated */
 
-    /* Handle exceptions */
-   if(s->trap_cause>=0){
-        r[rt] = rSave;
-        /* set cause field ... */
-        s->cp0_cause = (s->delay_slot & 0x1) << 31 | (s->trap_cause & 0x1f) << 2;
-        /* ...save previous KU/IE flags in SR... */
-        s->status = (s->status & 0xffffffc3) | ((s->status & 0x0f) << 2);
-        /* ...and raise KU(EXL) kernel mode flag */
-        s->status |= 0x02;
-        /* adjust epc if we (i.e. the victim instruction) are in a delay slot */
-        if(s->delay_slot){
-            epc = epc - 4;
-        }
-        s->epc = epc;
-        s->pc_next = VECTOR_TRAP;
-        s->skip = 1;
-        s->userMode = 0;
-        //s->wakeup = 1;
-    }
+    /* Handle exceptions, software and hardware */
+    /* Software-triggered traps have priority over HW interrupts, IIF they
+       trigger in the same clock cycle. */
+    process_traps(s, epc, rSave, rt);
 
     /* if we're NOT showing output to console, log state of CPU to file */
     if(!show_mode){
         s->wakeup |= log_cycle(s);
     }
-
-
 
     /* if this instruction was any kind of branch that actually jumped, then
        the next instruction will be in a delay slot. Remember it. */
@@ -1916,10 +1962,16 @@ void free_cpu(t_state *s){
 }
 
 void reset_cpu(t_state *s){
+    uint32_t i;
+
     s->pc = cmd_line_args.start_addr; /* reset start vector or cmd line address */
     s->delay_slot = 0;
     s->failed_assertions = 0; /* no failed assertions pending */
     s->status = 0x02; /* kernel mode, interrupts disabled */
+    s->instruction_ctr = 0;
+    for(i=0;i<NUM_HW_IRQS;i++){
+        s->t.irq_trigger_countdown[i] = -1;
+    }
     /* init trace struct to prevent spurious logs */
     s->t.status = s->status;
 }
