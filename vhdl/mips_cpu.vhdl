@@ -329,8 +329,9 @@ with (p2_wback_mux_sel) select p1_rbank_wr_data <=
 --------------------------------------------------------------------------------
 -- Register bank RAM & Rbank WE logic
 
-p1_rbank_we <= '1' when (p2_do_load='1' or p1_load_alu='1' or 
-                        p1_link='1' or p1_get_cp0='1') and 
+p1_rbank_we <= '1' when (p2_do_load='1' or p1_load_alu='1' or p1_link='1' or 
+                        -- if mfc0 triggers privilege trap, don't load reg
+                        (p1_get_cp0='1' and p1_cp_unavailable='0')) and 
                         -- If target register is $zero, ignore write
                         p1_rbank_wr_addr/="00000" and
                         -- if the cache controller keeps the cpu stopped, do
