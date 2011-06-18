@@ -6,7 +6,8 @@
 # 2.- Otherwise, nothing is done (as if the trapped opcode was a NOP) and a flag
 #     is set in the emu_frame area (meant for debugging, mostly).
 # 3.- In either case, if the trapped opcode is in a jump delay slot, the jump
-#     instruction is emulated. FIXME it isn't yet
+#     instruction is emulated. 
+#     FIXME it isn't yet
 #
 # Uses a small workspace in the BSS section. Does NOT use the regular stack
 # nor makes any assumptions about any registers, including the sp.
@@ -50,11 +51,14 @@ opcode_emu:
     sw      $t2,-32($k1)
     move    $sp,$k1
 
-    # FIXME handle delay slot situation: emulate jump if necessary
-    
-    # get bad opcode
-    mfc0    $t0,$14
+    mfc0    $t0,$14             # get bad opcode (or branch opcode if in DS)
     lw      $k0,0($t0)
+    
+    # Handle delay slot situation: emulate jump if necessary
+    mfc0    $k1,$13             # Check bit 31 (BD) from C0 cause register
+    bltzal  $k1,emulate_branch
+    nop
+    
     # decode instruction: either SPECIAL3 or SPECIAL2
     srl     $t1,$k0,26
     xori    $t0,$t1,0x01f
@@ -120,6 +124,19 @@ mips32_special3:
     j       opcode_emu_return
     nop
 
+    # Get the branch opcode, decode it and emulate it
+    # entry: $k0 = opcode, $t0 = address of branch
+    # exit: $k0 = opcode that triggered exception (in branch delay)
+emulate_branch:
+    
+    # FIXME branch emulation is missing!
+    lw      $k0,4($t0)          # read actual guilty opcode
+    jr      $ra
+    nop
+    
+    #---- Branch emulation routines --------------------------------------------
+    # FIXME branch emulation missing
+    
     #---- Opcode emulation routines --------------------------------------------
     
     # CLZ: rd <- count leading zeros on rs
