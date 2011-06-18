@@ -16,7 +16,8 @@ CFLAGS  = -O2 -Wall -c -s -fno-builtin -nostdlib -nodefaultlibs \
           -msoft-float -mips1 -G0
 
 #-- IMPORTANT: List of object files to be included in the library
-OBJS    = hw_ion_mpu.o soc.o syscalls.o printf-stdarg.o
+OBJS    = hw_ion_mpu.o soc.o syscalls.o printf-stdarg.o \
+          fp-bit-float.o fp-bit-double.o
 
 SRC = ./src
 
@@ -31,6 +32,10 @@ printf-stdarg.o:
 syscalls.o:         $(SRC)/soc.h
 hw_ion_mpu.o:       $(SRC)/soc.h $(SRC)/hw.h
 
+fp-bit-float.o: $(SRC)/fp-bit.c
+	$(CC) $(CFLAGS) -DFLOAT=1 $(SRC)/fp-bit.c -o fp-bit-float.o
+fp-bit-double.o:
+	$(CC) $(CFLAGS) $(SRC)/fp-bit.c -o fp-bit-double.o
 
 #-- Let's make some implicit rules explicit for clarity (well, 'clarity')
 
