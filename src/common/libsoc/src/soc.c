@@ -1,23 +1,14 @@
 /**
  @file  soc.c
  @brief Supporting functions that do not warrant their own file.
-
- @bug   Any attempt to use gets() or puts() triggers a linker error (undefined
-        reference to '_impure_ptr') in this file, despite the fact that this
-        file does not reference those symbols; newlib's gets and puts DO, and
-        the linker is somehow getting confused.
-        Right now I have no idea how to sort that out.
 */
 
 #include <stdint.h>
-#include <stdio.h>
-
 #include "soc.h"
 
-/* Linker-defined symbols usd to access the data section */
-extern char data_start [];          /**< Where .data section should be in RAM */
-extern char data_load_start [];     /**< Where .data section is in ROM */
-extern char data_size [];           /**< Size of .data section */
+/* Prototypes for external functions */
+extern void putchar(int c);
+extern int getchar(void);
 
 
 /*-- Non-standard utility functions ------------------------------------------*/
@@ -30,23 +21,10 @@ unsigned ctime(void){
     return cycles;
 }
 
-/** Copies .data sections (initialized data) from ROM to RAM.
-   Will be called from the startup code IIF the program was linked to run
-   from FLASH. */
-void copy_data_sections(void){
-    uint32_t i;
-    /* Move data section image from flash to RAM */
-    if (data_start != data_load_start){
-        for(i=0;i<(uint32_t)data_size;i++){
-            data_start[i] = data_load_start[i];
-        }
-    }
-}
-
 
 /*-- Libc replacement functions ----------------------------------------------*/
 
-/** Write character to console; replacement for standard puts. 
+/** Write string to console; replacement for standard puts. 
     Uses no buffering. */
 int puts(const char *string){
     while(*string){
@@ -65,7 +43,7 @@ int puts(const char *string){
     return 0; /* on success return anything non-negative */
 }
 
-/** Read character from console, blocking; replacement for standard puts. 
+/** Read string from console, blocking; replacement for standard puts. 
     Uses no buffering. */
 char *gets (char *str){
     uint32_t i=0;

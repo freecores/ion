@@ -30,9 +30,5 @@
 /** Return the time elapsed since last HW reset in clock cycles */
 unsigned ctime(void);
 
-/** Copy initialized '.data' sections from ROM to RAM.
-    This function relies on symbols defined by the kernel script.
- */
-void copy_data_sections(void);
 
 #endif // SOC_H_INCLUDED
