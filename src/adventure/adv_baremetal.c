@@ -36,10 +36,10 @@ uint32_t use_walkthrough = 1;
 void *alloc_mem(uint32_t num, uint32_t size){
     /* meant to be called only once */
     if(alloc_ptr>0){
-        puts("alloc_mem called more than once!\n");
+        printf("alloc_mem called more than once!\n");
     }
     if(size > (HEAP_SIZE/4)){
-        puts("Allocation error!\n");
+        printf("Allocation error!\n");
     }
     alloc_ptr++;
     return (void *)allocatable_space;
@@ -47,9 +47,7 @@ void *alloc_mem(uint32_t num, uint32_t size){
 
 void exit(uint32_t n){
     /*
-    puts("Exit code ");
-    print_num(n);
-    puts("\n");
+    printf("Exit code %d\n", n);
     */
     while(1);
 }
@@ -120,7 +118,7 @@ void startup(void){
 /* Ask user if (s)he wants to use the auto-walk */
 void prompt_use_walkthrough(void){
     char buffer[32];
-    puts("Do you want to use the auto-walkthrough?\n");
+    printf("Do you want to use the auto-walkthrough?\n");
     
     buffer[0] = '\0';
     while(1){
@@ -134,7 +132,7 @@ void prompt_use_walkthrough(void){
             break;
         }
         else{
-            puts("Please answer Y or N\n");
+            printf("Please answer Y or N\n");
         }
     }
     
@@ -157,7 +155,7 @@ char *get_command(char *str){
 
     if(use_walkthrough){
         if(walkthrough[step][0] == '\0'){
-            puts("<end of walkthrough, you're on your own>\n");
+            printf("<end of walkthrough, you're on your own>\n");
             use_walkthrough = 0;
         }
         for(i=0;walkthrough[step][i]!='\0';i++){
@@ -165,8 +163,8 @@ char *get_command(char *str){
         }
         str[i] = '\0';
         step++;
-        puts(str);
-        puts("\n");
+        printf(str);
+        printf("\n");
         return str;
     }
     else{

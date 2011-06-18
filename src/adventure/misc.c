@@ -842,9 +842,7 @@ void fBUG(NUM)long NUM; {
  *	28	INVALID MONTH RETURNED BY DATE FUNCTION
  *	29	TOO MANY PARAMETERS GIVEN TO SETPRM */
 
-    puts("Fatal error ");
-    po_num(NUM);
-    puts(".  See source code for interpretation.\n");
+    printf("Fatal error %d. See source code for interpretation.\n", NUM);
 	exit(FALSE);
 }
 
@@ -899,7 +897,7 @@ long I, VAL; static MFILE *OPENED = NULL;
 
 L15:	if(!OPENED){
 		OPENED=mopen("adventure.text","r" /* NOT binary */);
-		if(!OPENED){puts("Can't read adventure.text!\n"); exit(FALSE);}
+		if(!OPENED){printf("Can't read adventure.text!\n"); exit(FALSE);}
 		}
 	mgets(INLINE+1,100,OPENED);
 
@@ -929,7 +927,7 @@ long I, VAL;
 
 
 	if(LNLENG != 0) goto L10;
-	puts("\n");
+	printf("\n");
 	return;
 
 L10:	if(MAP2[1] == 0)MPINIT();
@@ -938,8 +936,8 @@ L10:	if(MAP2[1] == 0)MPINIT();
 L20:	{long x = VAL+1; INLINE[I]=MAP2[x];}
 	} /* end loop */
 	{long x = LNLENG+1; INLINE[x]=0;}
-	puts(INLINE+1);
-	puts("\n");
+	printf(INLINE+1);
+	printf("\n");
 	return;
 }
 
@@ -1004,10 +1002,10 @@ static FILE *F; char NAME[50];
 L10:	fclose(F);
 	return;
 
-L20:	puts("\nFile name: ");
+L20:	printf("\nFile name: ");
 	gets(NAME);
 	F=mopen(NAME,(IN ? READ_MODE : WRITE_MODE));
-	if(F == NULL) {puts("Can't open file, try again.\n"); goto L20;}
+	if(F == NULL) {printf("Can't open file, try again.\n"); goto L20;}
 	return;
 
 L30:	if(IN)fread(ARR,4,250,F);

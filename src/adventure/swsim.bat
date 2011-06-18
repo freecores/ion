@@ -3,4 +3,6 @@
     --bram=bootstrap.code ^
     --flash=adventure.bin ^
     --trigger=b0000000 ^
+    --nomips32 ^
+    --notrap10 ^
     --noprompt
