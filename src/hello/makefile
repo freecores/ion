@@ -1,54 +1,114 @@
+#-- Set up the toolchain -------------------------------------------------------
 
-# Get common makefile stuff (toolchain & system config)
-include ../common/makefile
-	
-# We'll run the simulation for 2000 clock cycles
+BIN_MIPS = C:/dev/embedded/SourceryGpp/mips-elf-11-03.52/bin
+CC = $(BIN_MIPS)/mips-sde-elf-gcc.exe $(CFLAGS)
+AS = $(BIN_MIPS)/mips-sde-elf-as
+LD = $(BIN_MIPS)/mips-sde-elf-ld
+DUMP = $(BIN_MIPS)/mips-sde-elf-objdump
+COPY = $(BIN_MIPS)/mips-sde-elf-objcopy
+TO_VHDL   = python ../bin2hdl.py
+
+
+#-- Set up the code structure --------------------------------------------------
+
+# VHDL test bench directory, where VHDL output files will be created
+TB_DIR = ../../vhdl/tb
+# VHDL DE-1 board demo root directory, for vhdl output
+DEMO_DIR = ../../vhdl/demo
+# Root test code source directory, where python script and vhdl templates are
+SRC_DIR = ..
+LIB_PATH = $(SRC_DIR)/common/libsoc
+LINK_SCRIPT = $(SRC_DIR)/bram.lds
+
+#-- Configure the application --------------------------------------------------
+
+# Simulation length in cycles; long enough to let the program run to completion.
 SIM_LENGTH = 90000
-	
+
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
 CODE_BRAM_SIZE = 2048
 # External RAM parameters (size in words)
 XRAM_SIZE = 1024
-XRAM_START = 0x00000000	
-	
-	
-LFLAGS = -Ttext $(BRAM_START) -Tdata $(XRAM_START) -eentry -I elf32-big	
-	
-clean:
-	-$(RM) *.o *.obj *.map *.lst *.hex *.exe *.axf *.code *.data
+XRAM_START = 0x00000000
 
-hello: hello.c
-	$(AS_MIPS) -o startup.o --defsym RUN_FROM_BRAM=1 $(SRC_DIR)/common/startup.s
-	$(GCC_MIPS) $(CFLAGS) -DRUN_FROM_BRAM -o baremetal.o $(SRC_DIR)/common/baremetal.c
-	$(GCC_MIPS) -o hello.o hello.c
-	$(LD_MIPS) $(LFLAGS) -Map hello.map -s -N -o hello.axf startup.o hello.o baremetal.o 
-	-@$(DUMP_MIPS) -m mips --disassemble hello.axf > hello.lst
+
+# 1.- Put the code in internal BRAM and the data in external SRAM.
+# 2.- Do not use any of the standard libraries and use libsoc instead.
+
+LFLAGS = -T$(LINK_SCRIPT) -L $(LIB_PATH) \
+         -Ttext $(BRAM_START) -Tdata $(XRAM_START) \
+         -nodefaultlibs -nostdlib -ereset -I elf32-big
+CFLAGS = -O2 -Wall -c -s -fno-builtin -nodefaultlibs -nostdlib \
+         -msoft-float -mips1 -G0
+AFLAGS = --defsym XRAM_BASE=$(XRAM_START)
+
+
+OBJS = bootstrap.o opcode_emu.o c_startup.o hello.o
+
+
+#-- Targets & rules ------------------------------------------------------------
+
+hello: hello.code hello.data
+	@# This comment prevents use of implicit rule so our rules are used instead.
+	@# This will save us a few harmless linker warnings.
+
+hello.axf: $(OBJS)
+	$(LD) $(LFLAGS) -Map hello.map -s -N -o hello.axf $(OBJS) -lsoc
+	-@$(DUMP) -m mips --disassemble hello.axf > hello.lst
+
+hello.code: hello.axf
 # Extract object code to be placed in code space
-	$(COPY_MIPS) -I elf32-big -O binary hello.axf hello.code
+	$(COPY) -I elf32-big -O binary hello.axf hello.code
+
+hello.data: hello.axf
 # Extract object code to be placed in data space
-	$(COPY_MIPS) -I elf32-big -j.data -j.bss -O binary hello.axf hello.data
-	
+	$(COPY) -I elf32-big -j.data -j.bss -O binary hello.axf hello.data
 
 
-# Create VHDL file for simulation test bench using TB2 template
-hello_sim: hello
+
+bootstrap.o: $(SRC_DIR)/common/bootstrap.s
+	$(AS) $(AFLAGS) -o bootstrap.o $(SRC_DIR)/common/bootstrap.s
+
+c_startup.o: $(SRC_DIR)/common/c_startup.s
+	$(AS) $(AFLAGS) -o c_startup.o $(SRC_DIR)/common/c_startup.s
+
+opcode_emu.o: $(SRC_DIR)/common/opcode_emu.s
+	$(AS) $(AFLAGS) -o opcode_emu.o $(SRC_DIR)/common/opcode_emu.s
+
+hello.o: hello.c
+	$(CC) $(CFLAGS) -o hello.o hello.c
+
+
+
+#-- Targets that build the synthesizable vhdl; meant for direct invocation -----
+
+#-- Create VHDL file for simulation test bench using TB2 template
+sim: hello
 	$(TO_VHDL) --code hello.code --data hello.data \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) --log_trigger=0xbfc00000 \
+		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
+		--log_trigger=0xbfc00000 \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
 
-# Create VHDL file for simulation test bench using TB0 template
-hello_sim_bram: hello
+#-- Create VHDL file for simulation test bench using TB0 template
+sim_bram: hello
 	$(TO_VHDL) --code hello.code --data hello.data \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb0_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
 
-
-# Create VHDL file for hardware demo
-hello_demo: hello
+#-- Create VHDL file for hardware demo
+demo: hello
 	$(TO_VHDL) --code hello.code --data hello.data \
 	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 	-v $(SRC_DIR)/mips_mpu1_template.vhdl \
 	-o $(DEMO_DIR)/mips_mpu.vhdl -e mips_mpu
+
+
+#-- And now the usual housekeeping stuff ---------------------------------------
+
+.PHONY: clean
+
+clean:
+	-$(RM) *.o *.obj *.map *.lst *.hex *.exe *.axf *.code *.data *.bin
