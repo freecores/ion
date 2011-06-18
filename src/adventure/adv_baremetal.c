@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "../common/baremetal.h"
 #include "adv_baremetal.h"
 
 extern const char *adventure_text[];

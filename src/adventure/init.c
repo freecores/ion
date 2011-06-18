@@ -4,7 +4,6 @@
 #include "funcs.h"
 #include <stdio.h>
 
-#include "../common/baremetal.h"
 #include "adv_baremetal.h"
 
 #define TRUE  (0==0)
