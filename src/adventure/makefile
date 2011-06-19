@@ -19,6 +19,8 @@ TB_DIR = ../../vhdl/tb
 DEMO_DIR = ../../vhdl/demo
 # Path to local libraries
 LIB_PATH = $(SRC_DIR)/common/libsoc
+# Link script to be used
+LINK_SCRIPT = $(SRC_DIR)/common/flash.lds
 
 #-- Configure the VHDL simulation environment ----------------------------------
 
@@ -55,7 +57,7 @@ AFLAGS_BOOT = --defsym RUN_FROM_BRAM=1 --defsym XRAM_BASE=$(XRAM_START)
 # Options for 'main' code running from FLASH at 0xb0000000:
 # 1.- Put the code in FLASH and the data in external SRAM.
 # 2.- Do not use any of the standard libraries and use libsoc instead.
-LFLAGS_MAIN = -Tflash.lds -L $(LIB_PATH) \
+LFLAGS_MAIN = -T$(LINK_SCRIPT) -L $(LIB_PATH) \
          -nodefaultlibs -nostdlib -eentry -I elf32-big
 CFLAGS_MAIN = -O2 -Wall -c -s -fno-builtin -nodefaultlibs -nostdlib \
          -msoft-float -mips1 -G0

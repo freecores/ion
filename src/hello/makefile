@@ -17,7 +17,9 @@ TB_DIR = ../../vhdl/tb
 DEMO_DIR = ../../vhdl/demo
 # Root test code source directory, where python script and vhdl templates are
 SRC_DIR = ..
+# Path to local libraries
 LIB_PATH = $(SRC_DIR)/common/libsoc
+# Link script to be used
 LINK_SCRIPT = $(SRC_DIR)/common/bram.lds
 
 #-- Configure the application --------------------------------------------------
