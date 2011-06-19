@@ -31,9 +31,10 @@ soc.o:              $(SRC)/soc.h
 printf-stdarg.o:
 syscalls.o:         $(SRC)/soc.h
 hw_ion_mpu.o:       $(SRC)/soc.h $(SRC)/hw.h
-
+# The FP math library is compiled separately for float support...
 fp-bit-float.o: $(SRC)/fp-bit.c
 	$(CC) $(CFLAGS) -DFLOAT=1 $(SRC)/fp-bit.c -o fp-bit-float.o
+# ...and for double support
 fp-bit-double.o:
 	$(CC) $(CFLAGS) $(SRC)/fp-bit.c -o fp-bit-double.o
 
