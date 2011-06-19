@@ -18,7 +18,7 @@ DEMO_DIR = ../../vhdl/demo
 # Root test code source directory, where python script and vhdl templates are
 SRC_DIR = ..
 LIB_PATH = $(SRC_DIR)/common/libsoc
-LINK_SCRIPT = $(SRC_DIR)/bram.lds
+LINK_SCRIPT = $(SRC_DIR)/common/bram.lds
 
 #-- Configure the application --------------------------------------------------
 
