@@ -1,10 +1,11 @@
 /**
 * ion_noxram.lds -- Linker script file for ION project (with no RAM or cache)
 *
-* WARNING: This script is no longer used by any makefile, to be removed.
+* WARNING: This script is no longer used by any makefile, to be removed or
+* refactored.
 *
-* The ion cpu has separate buses for code and data (Harvard architecture) but
-* does not have caches by default. This linker script targets that 'bare' 
+* The ion cpu has separate buses for code and data (Harvard architecture) and 
+* can be used with no cache. This linker script targets that 'bare' 
 * system configuration. It is meant for early testing and debugging.
 *
 * This script will split the object file in two areas so that they can be put 
@@ -15,7 +16,7 @@
 * Since data constants can't be reached from the code bus, constant data 
 * (usually in section rodata) needs to be put in the same space as other data.
 * This is the main purpose of this file.
-* Alternatively, we might jus implement a 3-port memory and leave all sections
+* Alternatively, we might just implement a 3-port memory and leave all sections
 * adjacent, but that would be too expensive (3-port memory would take about 
 * twice as many memory blocks for the same memory size).
 *

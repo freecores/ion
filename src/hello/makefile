@@ -1,25 +1,7 @@
-#-- Set up the toolchain -------------------------------------------------------
+#-- Bring toolchain config parameters from the common makefile
+include ..\\common\\makefile
 
-BIN_MIPS = C:/dev/embedded/SourceryGpp/mips-elf-11-03.52/bin
-CC = $(BIN_MIPS)/mips-sde-elf-gcc.exe $(CFLAGS)
-AS = $(BIN_MIPS)/mips-sde-elf-as
-LD = $(BIN_MIPS)/mips-sde-elf-ld
-DUMP = $(BIN_MIPS)/mips-sde-elf-objdump
-COPY = $(BIN_MIPS)/mips-sde-elf-objcopy
-TO_VHDL   = python ../bin2hdl.py
-
-
-#-- Set up the code structure --------------------------------------------------
-
-# VHDL test bench directory, where VHDL output files will be created
-TB_DIR = ../../vhdl/tb
-# VHDL DE-1 board demo root directory, for vhdl output
-DEMO_DIR = ../../vhdl/demo
-# Root test code source directory, where python script and vhdl templates are
-SRC_DIR = ..
-# Path to local libraries
-LIB_PATH = $(SRC_DIR)/common/libsoc
-# Link script to be used
+# Link script to be used: run from BRAM
 LINK_SCRIPT = $(SRC_DIR)/common/bram.lds
 
 #-- Configure the application --------------------------------------------------

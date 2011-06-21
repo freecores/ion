@@ -15,6 +15,8 @@
 # NOTE:
 # A link script '/src/ion_noxram.lds' was used in previous versions of the
 # project. It is no longer used. It is known to be buggy and will be removed.
+#
+# See info on flag -G0 in ion_noxram.lds
 #-------------------------------------------------------------------------------
 
 
@@ -33,11 +35,11 @@ LINUX_PWD =
 # MIPS GCC cross-toolchain: CodeSourcery -- replace with your own
 
 BIN_MIPS = C:/dev/embedded/SourceryGpp/mips-elf-11-03.52/bin
-GCC_MIPS  = $(BIN_MIPS)/mips-sde-elf-gcc.exe $(CFLAGS)
-AS_MIPS   = $(BIN_MIPS)/mips-sde-elf-as
-LD_MIPS   = $(BIN_MIPS)/mips-sde-elf-ld
-DUMP_MIPS = $(BIN_MIPS)/mips-sde-elf-objdump
-COPY_MIPS = $(BIN_MIPS)/mips-sde-elf-objcopy
+CC = $(BIN_MIPS)/mips-sde-elf-gcc.exe $(CFLAGS)
+AS = $(BIN_MIPS)/mips-sde-elf-as
+LD = $(BIN_MIPS)/mips-sde-elf-ld
+DUMP = $(BIN_MIPS)/mips-sde-elf-objdump
+COPY = $(BIN_MIPS)/mips-sde-elf-objcopy
 TO_VHDL   = python ../bin2hdl.py
 
 else
@@ -47,18 +49,17 @@ else
 # NOTE: we will not use gcc builtin functions or libc
 
 BIN_MIPS = /home/jaruiz/desarrollo/uClinux/MIPS/buildroot/buildroot-2010.11/output/staging/usr/bin
-GCC_MIPS = $(BIN_MIPS)/mips-unknown-linux-uclibc-gcc $(CFLAGS)
-AS_MIPS = $(BIN_MIPS)/mips-unknown-linux-uclibc-as
-LD_MIPS = $(BIN_MIPS)/mips-unknown-linux-uclibc-ld
-DUMP_MIPS = $(BIN_MIPS)/mips-unknown-linux-uclibc-objdump
-COPY_MIPS = $(BIN_MIPS)/mips-unknown-linux-uclibc-objcopy
+CC = $(BIN_MIPS)/mips-unknown-linux-uclibc-gcc $(CFLAGS)
+AS = $(BIN_MIPS)/mips-unknown-linux-uclibc-as
+LD = $(BIN_MIPS)/mips-unknown-linux-uclibc-ld
+DUMP = $(BIN_MIPS)/mips-unknown-linux-uclibc-objdump
+COPY = $(BIN_MIPS)/mips-unknown-linux-uclibc-objcopy
 TO_VHDL = python ../bin2hdl.py
 
 endif
 
-### System parameters ##########################################################
+### Default system parameters -- to be replaced in application makefile ########
 
-# FIXME clean up parameter names
 # 'CODE_BRAM' is meant to be a small BRAM (2 to 4KB) used for bootstrapping.
 # 'DATA_BRAM' is a small BRAM connected to the data ports, used for debugging.
 # 'XRAM' is meant to be the main external RAM, either SRAM or SDRAM.
@@ -68,7 +69,7 @@ endif
 CODE_BRAM_ADDRESS = 0
 # Default size of code BRAM in 32-bit words
 CODE_BRAM_SIZE = 1024
-# Default size of data BRAM in 32-bit words
+# Default size of data BRAM in 32-bit words (meant for simulation only)
 DATA_BRAM_SIZE = 256
 # Default address of BRAM -- used in some simulation-only tests, see makefiles
 DATA_BRAM_ADDRESS = 0x10000
@@ -77,22 +78,25 @@ XRAM_SIZE = 2048
 # Default address of XRAM
 XRAM_ADDRESS = 0x80000000
 
+### Project directories -- to be replaced in application makefile ##############
 
-### Build options ##############################################################
+# Root test code source directory, where python script and vhdl templates are
+SRC_DIR = ..
+# VHDL test bench directory, where VHDL output files will be created
+TB_DIR = ../../vhdl/tb
+# VHDL DE-1 board demo root directory, for vhdl output
+DEMO_DIR = ../../vhdl/demo
+# Path to local libraries
+LIB_PATH = $(SRC_DIR)/common/libsoc
+# Link script to be used
+LINK_SCRIPT = $(SRC_DIR)/common/flash.lds
+
+### Build options -- to be replaced in application makefile ####################
 
 # Don't use gcc builtin functions, and try to target MIPS-I architecture
 # This will prevent usage of unimplemented opcodes but will insert nops after
 # load instructions, which Ion does not need.
 # (See comment above about -G0 flag)
-CFLAGS = -O2 -Wall -c -s -fno-builtin -mips1 -G0
+CFLAGS = -O2 -Wall -c -s -fno-builtin -mips1 -G0 -nodefaultlibs -nostdlib
 
 # LFLAGS: linker options are in the respective makefiles
-
-### Project directories ########################################################
-
-# VHDL test bench directory, where VHDL output files will be created
-TB_DIR = ../../vhdl/tb
-# VHDL DE-1 board demo root directory, for vhdl output
-DEMO_DIR = ../../vhdl/demo
-# Root test code source directory, where python script and vhdl templates are
-SRC_DIR = ..
