@@ -2005,6 +2005,7 @@ void reset_cpu(t_state *s){
     s->failed_assertions = 0; /* no failed assertions pending */
     s->status = 0x02; /* kernel mode, interrupts disabled */
     s->instruction_ctr = 0;
+    s->inst_ctr_prescaler = 0;
     for(i=0;i<NUM_HW_IRQS;i++){
         s->t.irq_trigger_countdown[i] = -1;
     }
