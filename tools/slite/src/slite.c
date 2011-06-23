@@ -117,7 +117,7 @@ typedef struct s_map {
 t_map memory_maps[NUM_MEM_MAPS] = {
     {/* Experimental memory map (default) */
         {/* Bootstrap BRAM, read only */
-        {VECTOR_RESET,  0x00004800, 0xf8000000, 1, NULL, "Boot BRAM"},
+        {VECTOR_RESET,  0x00008000, 0xf8000000, 1, NULL, "Boot BRAM"},
         /* main external ram block  */
         {0x00000000,    0x00080000, 0xf8000000, 0, NULL, "XRAM0"},
         /* main external ram block  */
@@ -129,7 +129,7 @@ t_map memory_maps[NUM_MEM_MAPS] = {
 
     {/* uClinux memory map with bootstrap BRAM, debug only, to be removed */
         {/* Bootstrap BRAM, read only */
-        {VECTOR_RESET,  0x00001000, 0xf8000000, 1, NULL, "Boot BRAM"},
+        {VECTOR_RESET,  0x00008000, 0xf8000000, 1, NULL, "Boot BRAM"},
         /* main external ram block  */
         {0x80000000,    0x00800000, 0xf8000000, 0, NULL, "XRAM0"},
         {0x00000000,    0x00800000, 0xf8000000, 0, NULL, "XRAM1"},
@@ -140,7 +140,7 @@ t_map memory_maps[NUM_MEM_MAPS] = {
 
     {/* Experimental memory map with small XRAM */
         {/* Bootstrap BRAM, read only */
-        {VECTOR_RESET,  0x00004800, 0xf8000000, 1, NULL, "Boot BRAM"},
+        {VECTOR_RESET,  0x00008000, 0xf8000000, 1, NULL, "Boot BRAM"},
         /* main external ram block  */
         {0x00000000,    0x00001000, 0xf8000000, 0, NULL, "XRAM0"},
         /* main external ram block  */
@@ -175,6 +175,8 @@ typedef struct s_args {
     uint32_t trap_on_reserved;
     /** !=0 to emulate some common mips32 opcodes */
     uint32_t emulate_some_mips32;
+    /** Prescale value used for the timer/counter */
+    uint32_t timer_prescaler;
     /** address to start execution from (by default, reset vector) */
     uint32_t start_addr;
     /** memory map to be used */
@@ -274,6 +276,9 @@ void slite_sleep(unsigned int value){
 #define DBG_REGS          (0x20010000)
 #define UART_WRITE        (0x20000000)
 #define UART_READ         (0x20000000)
+#define TIMER_READ        (0x20000100)
+
+#define DEFAULT_TIMER_PRESCALER (50)
 
 /* FIXME The following addresses are remnants of Plasma to be removed */
 #define IRQ_MASK          0x20000010
@@ -327,6 +332,7 @@ typedef struct s_state {
 
    int delay_slot;              /**< !=0 if prev. instruction was a branch */
    uint32_t instruction_ctr;    /**< # of instructions executed since reset */
+   uint32_t inst_ctr_prescaler; /**< Prescaler counter for instruction ctr. */
 
    int r[32];
    int opcode;
@@ -536,6 +542,10 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
         //s->irqStatus &= ~IRQ_UART_READ_AVAILABLE; //clear bit
         printf("%c", HWMemory[0]);
         return (HWMemory[0] << 24) | 0x03;
+    case TIMER_READ:
+        printf("TIMER = %10d\n", s->instruction_ctr);
+        return s->instruction_ctr;
+        break;
     case IRQ_MASK:
        return HWMemory[1];
     case IRQ_MASK + 4:
@@ -971,9 +981,10 @@ void process_traps(t_state *s, uint32_t epc, uint32_t rSave, uint32_t rt){
         /* If there's any hardware interrupt pending, deal with it */
         for(i=0;i<NUM_HW_IRQS;i++){
             if(s->t.irq_trigger_countdown[i]==0){
-                /* trigger interrupt i */
-                /* FIXME handle irq mask(s) in SR */
-                //cause = 0; /* cause = hardware interrupt */
+                /* trigger interrupt i IF it is not masked */
+                if(s->status & (1 << (8 + i))){
+                    cause = 0; /* cause = hardware interrupt */
+                }
                 s->t.irq_trigger_countdown[i]--;
             }
             else if (s->t.irq_trigger_countdown[i]>0){
@@ -1018,7 +1029,13 @@ void cycle(t_state *s, int show_mode){
     uint32_t target_offset16;
     uint32_t target_long;
 
-    s->instruction_ctr++;
+    /* Update cycle counter (we implement an instruction counter actually )*/
+    s->inst_ctr_prescaler++;
+    if(s->inst_ctr_prescaler == (cmd_line_args.timer_prescaler-1)){
+        s->inst_ctr_prescaler = 0;
+        s->instruction_ctr++;
+    }
+    /* No traps pending for this instruction (yet) */
     s->trap_cause = -1;
 
     /* fetch and decode instruction */
@@ -1177,8 +1194,14 @@ void cycle(t_state *s, int show_mode){
                            r[rd]=s->pc_next;
                            s->pc_next=r[rs];
                            log_call(s->pc_next, epc); break;
-        case 0x0a:/*MOVZ*/ if(!r[rt]) r[rd]=r[rs];   break;  /*IV*/
-        case 0x0b:/*MOVN*/ if(r[rt]) r[rd]=r[rs];    break;  /*IV*/
+        case 0x0a:/*MOVZ*/  if(cmd_line_args.emulate_some_mips32){   /*IV*/
+                                if(!r[rt]) r[rd]=r[rs];
+                            };
+                            break;
+        case 0x0b:/*MOVN*/  if(cmd_line_args.emulate_some_mips32){    /*IV*/
+                                if(r[rt]) r[rd]=r[rs];
+                            };
+                            break;
         case 0x0c:/*SYSCALL*/ s->trap_cause = 8;
                               /*
                               //FIXME enable when running uClinux
@@ -1251,12 +1274,14 @@ void cycle(t_state *s, int show_mode){
     case 0x10:/*COP0*/
         if(s->status & 0x02){ /* kernel mode? */
             if(opcode==0x42000010){  // rfe
-                /* FIXME unimplemented yet */
+                /* restore ('pop') the KU/IE flag values */
+                s-> status = (s->status & 0xfffffff0) |
+                             ((s->status & 0x03c) >> 2);
             }
             else if((opcode & (1<<23)) == 0){  //move from CP0 (mfc0)
                 //printf("mfc0: [%02d]=0x%08x @ [0x%08x]\n", rd, s->status, epc);
                 switch(rd){
-                    case 12: r[rt]=s->status & 0x0000003f; break;
+                    case 12: r[rt]=s->status & 0x0000ff3f; break;
                     case 13: r[rt]=s->cp0_cause; break;
                     case 14: r[rt]=s->epc; break;
                     case 15: r[rt]=R3000_ID; break;
@@ -1269,7 +1294,7 @@ void cycle(t_state *s, int show_mode){
             else{                         //move to CP0 (mtc0)
                 /* FIXME check CF= reg address */
                 if(rd==12){
-                    s->status=r[rt] & 0x0003003f; /* mask W/O bits */
+                    s->status=r[rt] & 0x0003ff3f; /* mask W/O bits */
                     //printf("mtc0: [SR]=0x%08x @ [0x%08x]\n", s->status, epc);
                 }
                 else{
@@ -2035,6 +2060,7 @@ int32_t parse_cmd_line(uint32_t argc, char **argv, t_args *args){
     args->memory_map = MAP_DEFAULT;
     args->trap_on_reserved = 1;
     args->emulate_some_mips32 = 1;
+    args->timer_prescaler = DEFAULT_TIMER_PRESCALER;
     args->start_addr = VECTOR_RESET;
     args->do_unaligned = 0;
     args->no_prompt = 0;
