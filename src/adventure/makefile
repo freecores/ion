@@ -1,5 +1,5 @@
 #-- Bring toolchain config parameters from the common makefile
-include ..\\common\\makefile
+include ../common/makefile
 
 #-- Configure the VHDL simulation environment ----------------------------------
 
@@ -115,8 +115,8 @@ sim: bootstrap adventure
 demo: bootstrap adventure
 	$(TO_VHDL) --code bootstrap.code \
 	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-	-v $(SRC_DIR)/mips_mpu1_template.vhdl \
-	-o $(DEMO_DIR)/mips_mpu.vhdl -e mips_mpu
+	-v $(SRC_DIR)/code_rom_template.vhdl -n "Adventure" \
+	-o $(DEMO_DIR)/code_rom_pkg.vhdl
 
 
 #-- And now the usual housekeeping stuff ---------------------------------------

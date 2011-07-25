@@ -1,5 +1,5 @@
 #-- Bring toolchain config parameters from the common makefile -----------------
-include ..\\common\\makefile
+include ../common/makefile
 
 # We'll run the simulation for long enough to complete the test
 SIM_LENGTH = 400000
@@ -78,8 +78,8 @@ sim: memtest
 demo: memtest
 	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xb0000000 \
 	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-	-v $(SRC_DIR)/mips_mpu1_template.vhdl \
-	-o $(DEMO_DIR)/mips_mpu.vhdl -e mips_mpu
+	-v $(SRC_DIR)/code_rom_template.vhdl  -n "Memory test" \
+	-o $(DEMO_DIR)/code_rom_pkg.vhdl
 
     
 #-- And now the usual housekeeping stuff ---------------------------------------
