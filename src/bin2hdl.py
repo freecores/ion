@@ -6,6 +6,7 @@ examples.
 import sys
 import getopt
 import math
+import datetime
 
 
 def usage():
@@ -18,6 +19,7 @@ def usage():
     print "{v|vhdl} <filename>        VHDL template"
     print "{a|architecture} <name>    Name of target VHDL architecture"
     print "{e|entity} <name>          Name of target VHDL entity"
+    print "{n|name} <name>            Name of project (used only in comment)"
     print "{o|output} <filename>      Target VHDL file name"
     print "code_size <number>         Size of bram memory in words (decimal)"
     print "data_size <number>         Size of data memory in words (decimal)"
@@ -43,6 +45,7 @@ def help():
     print "Other template tags are replaced as follows:"
     print "@entity_name@         : Name of entity in target vhdl file"
     print "@arch_name@           : Name of architecture in target vhdl file"
+    print "@fileinfo@            : Info about the generated vhdl file"
     print "@sim_len@             : Length of simulation in clock cycles"
     print "@code_table_size@     : Size of code RAM block, in words"
     print "@code_addr_size@      : ceil(Log2(@code_table_size@))"
@@ -182,6 +185,7 @@ def main(argv):
     vhdl_filename = ""          # name of vhdl template file
     entity_name = "mips_tb"     # name of vhdl entity to be generated
     arch_name = "testbench"     # name of vhdl architecture to be generated
+    proj_name = "<?>"           # name of project as shown in file info comment
     target_filename = "tb.vhdl" # name of target vhdl file
     indent = 4                  # indentation for table data, in spaces
     code_table_size = -1        # size of VHDL table
@@ -195,9 +199,12 @@ def main(argv):
     #
 
     try:                                
-        opts, args = getopt.getopt(argv, "hc:d:v:a:e:o:i:s:f:t:", 
+        opts, args = getopt.getopt(argv, "hc:d:v:a:e:o:i:s:f:t:n:", 
         ["help", "code=", "data=", "vhdl=", "architecture=", 
+         # long name args that have short version
          "entity=", "output=", "indent=", "sim_len=", "flash=", "log_trigger=",
+         "name=",
+         # long name args that DON'T have short version
          "code_size=", "data_size=", "flash_size="])
     except getopt.GetoptError, err:
         print ""
@@ -225,6 +232,8 @@ def main(argv):
             arch_name = arg
         elif opt in ("-e", "--entity"):
             entity_name = arg
+        elif opt in ("-n", "--name"):
+            proj_name = arg
         elif opt in ("-i", "--indent"):
             indent = int(arg)
         elif opt in ("-t", "--log_trigger"):
@@ -245,6 +254,13 @@ def main(argv):
         usage()
         sys.exit(2)
 
+    # Once all cmd line argumets are parsed, build secondary stuff out of them.
+    # Contents of 1st vhdl comment line
+    fileinfo = "File built automatically for project '" + proj_name + \
+               "' by bin2hdl.py" # + \
+               #str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+        
     #---------------------------------------------------------------------------    
     # Read BRAM initialization file, if any
     try:
@@ -338,6 +354,7 @@ def main(argv):
                 "@data-32bit@",
                 "@flash@",
                 "@entity_name@","@arch_name@",
+                "@fileinfo@",
                 "@sim_len@",
                 "@xram_size@",
                 "@code_table_size@","@code_addr_size@",
@@ -346,7 +363,8 @@ def main(argv):
                 "@log_trigger_addr@"];
     replacement = vhdl_code_strings + vhdl_data_strings + \
                  [vhdl_flash_string,
-                  entity_name, arch_name, 
+                  entity_name, arch_name,
+                  fileinfo,
                   str(simulation_length),
                   str(data_table_size),
                   str(code_table_size),
