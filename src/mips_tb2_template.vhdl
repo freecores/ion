@@ -1,5 +1,7 @@
 --##############################################################################
--- This file was generated automatically from '/src/mips_tb2_template.vhdl'.
+-- WARNING: THIS FILE IS DEPRECATED and will be removed soon.
+-- As of revision 193 the test bench used is tb/mips_tb.vhdl.
+-- Just ignore this file.
 -- 
 --------------------------------------------------------------------------------
 -- Simulation test bench TB2 -- not synthesizable.
