@@ -68,12 +68,17 @@ hello.o: hello.c
 #-- Targets that build the synthesizable vhdl; meant for direct invocation -----
 
 #-- Create VHDL file for simulation test bench using TB2 template
-sim: hello
+sim: hello demo
 	$(TO_VHDL) --code hello.code --data hello.data \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		--log_trigger=0xbfc00000 \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)/mips_tb2_template.vhdl \
 		-o $(TB_DIR)/mips_tb2.vhdl -e mips_tb2
+	$(TO_VHDL) --code hello.code --data hello.data \
+		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
+		--log_trigger=0xbfc00000 \
+		-s $(SIM_LENGTH) -v $(SRC_DIR)/sim_params_template.vhdl \
+		-o $(TB_DIR)/sim_params_pkg.vhdl -e mips_tb2
 
 #-- Create VHDL file for simulation test bench using TB0 template
 sim_bram: hello

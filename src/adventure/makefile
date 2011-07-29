@@ -103,12 +103,17 @@ bootstrap: bootstrap.axf
 
 
 # Create VHDL file for simulation test bench using TB2 template
-sim: bootstrap adventure
+sim: bootstrap adventure demo
 	$(TO_VHDL) --code bootstrap.code --log_trigger=b0000000 \
 		--flash adventure.bin --flash_size $(FLASH_SIM_SIZE) \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
-		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
+		-o $(TB_DIR)\\mips_tb2.vhdl -e dummy -n "Adventure"
+	$(TO_VHDL) --code bootstrap.code --log_trigger=b0000000 \
+		--flash adventure.bin --flash_size $(FLASH_SIM_SIZE) \
+		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
+		-s $(SIM_LENGTH) -v $(SRC_DIR)\\sim_params_template.vhdl \
+		-o $(TB_DIR)\\sim_params_pkg.vhdl -e dummy -n "Adventure"
 
 
 # Create VHDL file for hardware demo

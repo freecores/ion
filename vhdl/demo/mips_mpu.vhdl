@@ -1,12 +1,5 @@
 --------------------------------------------------------------------------------
--- This file was generated automatically from '/src/mips_mpu2_template.vhdl'.
---------------------------------------------------------------------------------
--- Synthesizable MPU -- CPU + cache + bootstrap BRAM + UART
---
--- This module uses the 'stub' version of the cache: a cache which actually is 
--- only an interface between the cpu and external static memory. This is useful 
--- to test external memory interface and cache-cpu interface without the cache
--- functionality getting in the way.
+-- Synthesizable MPU -- CPU + cache + bootstrap ROM (BRAM) + UART
 --------------------------------------------------------------------------------
 -- Copyright (C) 2011 Jose A. Ruiz
 --                                                              
@@ -107,7 +100,7 @@ signal uart_read :          std_logic;
 signal uart_read_rx :       std_logic;
 signal uart_data_rx :       std_logic_vector(7 downto 0);
 
--- Bootstrap code BRAM
+-- interface to bootstrap code BRAM
 -- NOTE: 'write' signals are a remnant from a previous version, to be removed
 signal bram_rd_addr :       t_bram_address; 
 signal bram_wr_addr :       t_bram_address;

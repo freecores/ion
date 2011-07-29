@@ -49,6 +49,11 @@ use work.txt_util.all;
 
 package mips_tb_pkg is
 
+-- Maximum line size of for console output log. Lines longer than this will be
+-- truncated.
+constant CONSOLE_LOG_LINE_SIZE : integer := 1024*4;
+
+
 type t_pc_queue is array(0 to 3) of t_word;
 
 type t_log_info is record
@@ -90,6 +95,9 @@ type t_log_info is record
     
     word_loaded :           t_word;
     
+    uart_tx :               std_logic;
+    io_wr_data :            t_word;
+    
     mdiv_address :          t_word;
     mdiv_pending :          boolean;
     
@@ -103,6 +111,10 @@ type t_log_info is record
     write_pending :         boolean;
     debug :                 t_word;
     
+    -- Console log line buffer --------------------------------------
+    con_line_buf :         string(1 to CONSOLE_LOG_LINE_SIZE);
+    con_line_ix :          integer;
+    
     -- Log trigger --------------------------------------------------
     -- Enable logging after fetching from a given address -----------
     log_trigger_address :   t_word;
@@ -112,12 +124,14 @@ end record t_log_info;
 procedure log_cpu_activity(
                 signal clk :    in std_logic;
                 signal reset :  in std_logic;
-                signal done :   in std_logic;
-                entity_name :   string;
+                signal done :   in std_logic;   
+                mcu_entity :    string;
+                cpu_name :      string;
                 signal info :   inout t_log_info; 
                 signal_name :   string;
                 trigger_addr :  in t_word;
-                file l_file :   TEXT);
+                file l_file :   TEXT;
+                file con_file : TEXT);
 
 
 end package;
@@ -126,12 +140,14 @@ package body mips_tb_pkg is
 
 procedure log_cpu_status(
                 signal info :   inout t_log_info;
-                file l_file :   TEXT) is
+                file l_file :   TEXT;
+                file con_file : TEXT) is
 variable i : integer;
 variable ri : std_logic_vector(7 downto 0);
 variable full_pc, temp, temp2 : t_word;
 variable k : integer := 2;
-variable log_trap_status : boolean := false;
+variable log_trap_status :      boolean := false;
+variable uart_data : integer;
 begin
     
     -- Trigger logging if the CPU fetches from trigger address
@@ -334,40 +350,81 @@ begin
 
     info.prev_count_reg <= info.mdiv_count_reg;
 
+    -- Log data sent to UART ---------------------------------------------------
+    
+    
+    -- TX data may come from the high or low byte (opcodes.s
+    -- uses high byte, no_op.c uses low)
+    if info.uart_tx = '1' then
+        uart_data := conv_integer(unsigned(info.io_wr_data(7 downto 0)));
+    
+        -- UART TX data goes to output after a bit of line-buffering
+        -- and editing
+        if uart_data = 10 then
+            -- CR received: print output string and clear it
+            print(con_file, info.con_line_buf(1 to info.con_line_ix));
+            info.con_line_ix <= 1;
+            for i in 1 to info.con_line_buf'high loop
+               info.con_line_buf(i) <= ' ';
+            end loop;
+        elsif uart_data = 13 then
+            -- ignore LF
+        else
+            -- append char to output string
+            if info.con_line_ix < info.con_line_buf'high then
+                info.con_line_buf(info.con_line_ix) <= character'val(uart_data);
+                info.con_line_ix <= info.con_line_ix + 1;
+            end if;
+        end if;
+    end if;
+    
+    
 end procedure log_cpu_status;
 
 procedure log_cpu_activity(
                 signal clk :    in std_logic;
                 signal reset :  in std_logic;
                 signal done :   in std_logic;   
-                entity_name :   string;
+                mcu_entity :    string;
+                cpu_name :      string;
                 signal info :   inout t_log_info; 
                 signal_name :   string;
                 trigger_addr :  in t_word;
-                file l_file :   TEXT) is
+                file l_file :   TEXT;
+                file con_file : TEXT) is
 begin
-    init_signal_spy("/"&entity_name&"/p1_rbank", signal_name&".rbank", 0, -1);
-    init_signal_spy("/"&entity_name&"/code_rd_addr", signal_name&".present_code_rd_addr", 0, -1);
-    init_signal_spy("/"&entity_name&"/mult_div/upper_reg", signal_name&".reg_hi", 0, -1);
-    init_signal_spy("/"&entity_name&"/mult_div/lower_reg", signal_name&".reg_lo", 0, -1);
-    init_signal_spy("/"&entity_name&"/mult_div/negate_reg", signal_name&".negate_reg_lo", 0, -1);
-    init_signal_spy("/"&entity_name&"/mult_div/count_reg", signal_name&".mdiv_count_reg", 0, -1);
-    init_signal_spy("/"&entity_name&"/cp0_epc", signal_name&".cp0_epc", 0, -1);
-    init_signal_spy("/"&entity_name&"/cp0_status", signal_name&".cp0_status", 0, -1);
-    init_signal_spy("/"&entity_name&"/p1_set_cp0", signal_name&".p1_set_cp0", 0, -1);
-    init_signal_spy("/"&entity_name&"/p1_rfe", signal_name&".p1_rfe", 0, -1);
-    init_signal_spy("/"&entity_name&"/cp0_cache_control", signal_name&".cp0_cache_control", 0, -1);
-    init_signal_spy("/"&entity_name&"/data_rd_vma", signal_name&".data_rd_vma", 0, -1);
-    init_signal_spy("/"&entity_name&"/p1_rbank_we", signal_name&".p1_rbank_we", 0, -1);
-    init_signal_spy("/"&entity_name&"/code_rd_vma", signal_name&".code_rd_vma", 0, -1);
-    init_signal_spy("/"&entity_name&"/p2_do_load", signal_name&".load", 0, -1);
-    init_signal_spy("/"&entity_name&"/data_addr", signal_name&".present_data_wr_addr", 0, -1);
-    init_signal_spy("/"&entity_name&"/data_wr", signal_name&".present_data_wr", 0, -1);
-    init_signal_spy("/"&entity_name&"/byte_we", signal_name&".data_byte_we", 0, -1);
-    init_signal_spy("/"&entity_name&"/p2_data_word_rd", signal_name&".word_loaded", 0, -1);
-    init_signal_spy("/"&entity_name&"/data_addr", signal_name&".present_data_rd_addr", 0, -1);
-    init_signal_spy("/"&entity_name&"/p1_exception", signal_name&".exception", 0, -1);
-
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_rbank", signal_name&".rbank", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/code_rd_addr", signal_name&".present_code_rd_addr", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/mult_div/upper_reg", signal_name&".reg_hi", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/mult_div/lower_reg", signal_name&".reg_lo", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/mult_div/negate_reg", signal_name&".negate_reg_lo", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/mult_div/count_reg", signal_name&".mdiv_count_reg", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cp0_epc", signal_name&".cp0_epc", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cp0_status", signal_name&".cp0_status", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_set_cp0", signal_name&".p1_set_cp0", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_rfe", signal_name&".p1_rfe", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cp0_cache_control", signal_name&".cp0_cache_control", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/data_rd_vma", signal_name&".data_rd_vma", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_rbank_we", signal_name&".p1_rbank_we", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/code_rd_vma", signal_name&".code_rd_vma", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p2_do_load", signal_name&".load", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/data_addr", signal_name&".present_data_wr_addr", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/data_wr", signal_name&".present_data_wr", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/byte_we", signal_name&".data_byte_we", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p2_data_word_rd", signal_name&".word_loaded", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/data_addr", signal_name&".present_data_rd_addr", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_exception", signal_name&".exception", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/uart_write", signal_name&".uart_tx", 0, -1);
+    init_signal_spy("/"&mcu_entity&"/mpu_io_wr_data", signal_name&".io_wr_data", 0, -1);
+    
+    -- We force both 'rdy' uart outputs to speed up the simulation (since the
+    -- UART operation is not simulated, just logged).
+    signal_force("/"&mcu_entity&"/uart_tx_rdy", "1", 0 ms, freeze, -1 ms, 0);
+    signal_force("/"&mcu_entity&"/uart_rx_rdy", "1", 0 ms, freeze, -1 ms, 0);
+    -- And we force the UART RX data to a predictable value until we implement
+    -- UART RX simulation, eventually.
+    signal_force("/"&mcu_entity&"/uart_data_rx", "00000000", 0 ms, freeze, -1 ms, 0);
+    
     while done='0' loop
         wait until clk'event and clk='1';
         if reset='1' then
@@ -380,8 +437,10 @@ begin
             info.log_trigger_address <= trigger_addr;
             info.log_triggered <= false;
             info.debug <= (others => '0');
+            
+            info.con_line_ix <= 1; -- uart log line buffer is empty
         else
-            log_cpu_status(info, l_file);
+            log_cpu_status(info, l_file, con_file);
         end if;
     end loop;
     

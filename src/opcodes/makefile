@@ -32,8 +32,13 @@ opcodes:
 sim: opcodes
 	$(TO_VHDL) --code opcodes.bin --data opcodes.data --log_trigger=0xbfc00000 \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(DATA_BRAM_SIZE) \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
-		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
+		-s $(SIM_LENGTH) -v $(SRC_DIR)/sim_params_template.vhdl \
+		-o $(TB_DIR)\\sim_params_pkg.vhdl -e dummy -n "Opcode tester"
+	$(TO_VHDL) --code opcodes.bin --data opcodes.data --log_trigger=0xbfc00000 \
+	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
+	-v $(SRC_DIR)/code_rom_template.vhdl -n "Opcode tester" \
+	-o $(DEMO_DIR)/code_rom_pkg.vhdl 
+
 
         
 #-- And now the usual housekeeping stuff ---------------------------------------

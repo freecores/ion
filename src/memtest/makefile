@@ -66,12 +66,17 @@ flash.bin: flash.axf
 #-- Targets that build the synthesizable vhdl; meant for direct invocation -----
     
 # Create VHDL file for simulation test bench using TB2 template
-sim: memtest
+sim: memtest demo
 	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xbfc00000 \
 		--flash flash.bin --flash_size 4096 \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
 		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
+	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xbfc00000 \
+		--flash flash.bin --flash_size 4096 \
+		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
+		-s $(SIM_LENGTH) -v $(SRC_DIR)/sim_params_template.vhdl \
+		-o $(TB_DIR)/sim_params_pkg.vhdl -e mips_tb2
 
 
 # Create VHDL file for hardware demo
