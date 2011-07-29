@@ -3,5 +3,5 @@ serial port (19200/8/N/1).
 
 See makefile for targets, etc.
 
-This program can be simulated with TB2 and can be built into a hardware 
-demo.
+Can be simulated (both Modelsim and SW simulator) and synthesized to a hardware
+demo (see makefiles).
