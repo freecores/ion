@@ -4,7 +4,7 @@
 -- project:       ION (http://www.opencores.org/project,ion_cpu)
 -- author:        Jose A. Ruiz (ja_rd@hotmail.com)
 -- created:       Jan/11/2011
--- last modified: Jun/05/2011 (ja_rd@hotmail.com)
+-- last modified: Jul/31/2011 (ja_rd@hotmail.com)
 --------------------------------------------------------------------------------
 -- Please read file /doc/ion_project.txt for usage instructions.
 --------------------------------------------------------------------------------
@@ -19,23 +19,20 @@
 --     if the target register is not used in the following instruction. So that
 --     every load takes two cycles.
 --     The interlock logic should check register indices (@note2)
--- 2.- CP0 SR (status register) bits KUo/IEo & KUP/IEp are missing.
---     This means that EXCEPTIONS CAN'T BE NESTED in this version of the CPU.
--- 3.- Invalid instruction side effects:
+-- 2.- Invalid instruction side effects:
 --     Invalid opcodes do trap but the logic that prevents bad opcodes from
 --     having side affects has not been tested yet.
--- 4.- Kernel/user status.
+-- 3.- Kernel/user status.
 --     When in user mode, COP* instructions will trigger a 'CpU' exception.
 --     BUT there's no address checking and user code can still access kernel 
 --     space in this version.
---     Besides, see point 2 above about the missing SR bits.
 --
 --------------------------------------------------------------------------------
 -- KNOWN BUGS:
 --
 -- 1.- The instruction executed right after entering user mode (i.e. the 
 --     instruction after the MTC0 or RFE that clears the KU flag) is executed 
---     in kernel mode (instead of user mode). This is a gapping security hole,
+--     in kernel mode (instead of user mode). This is a gaping security hole,
 --     in case it makes any sense to speak of security in this project at this
 --     stage. 
 --     This can be easily fixed but is not very urgent.
@@ -82,7 +79,7 @@ entity mips_cpu is
     port(
         clk             : in std_logic;
         reset           : in std_logic;
-        interrupt       : in std_logic;
+        interrupt       : in std_logic_vector(7 downto 0);
 
         data_addr       : out std_logic_vector(31 downto 0);
 

@@ -95,6 +95,8 @@ signal io_byte_we :         std_logic_vector(3 downto 0);
 signal rxd :                std_logic;
 signal txd :                std_logic;
 
+-- Other CPU signals 
+signal cpu_irq :            std_logic_vector(7 downto 0);
 
 --------------------------------------------------------------------------------
 -- Logging signals
@@ -109,8 +111,16 @@ file con_file: TEXT open write_mode is "hw_sim_console_log.txt";
 -- All the info needed by the logger is here
 signal log_info :           t_log_info;
 
--- Debug signals ---------------------------------------------------------------
+-- IRQ trigger simulation ------------------------------------------------------
 
+signal irq_trigger_addr :   std_logic_vector(2 downto 0);
+signal irq_trigger_data :   std_logic_vector(31 downto 0);
+signal irq_trigger_load :   std_logic;
+
+subtype t_irq_countdown     is std_logic_vector(31 downto 0);
+type t_irq_countdown_array  is array(0 to 7) of t_irq_countdown;
+
+signal irq_countdown :      t_irq_countdown_array;
 
 
 begin
@@ -122,7 +132,7 @@ begin
         SRAM_ADDR_SIZE => 32
     )
     port map (
-        interrupt       => '0',
+        interrupt       => cpu_irq(0),
 
         -- interface to FPGA i/o devices
         io_rd_data      => io_rd_data,
@@ -231,8 +241,57 @@ begin
     
 
     -- Simulate dummy I/O traffic external to the MCU --------------------------
-    -- FIXME console logging missing! IO too!
+    -- the only IO present is the test interrupt trigger registers
+    simulated_io:
+    process(clk)
+    variable i : integer;
+    variable uart_data : integer;
+    begin
+        if clk'event and clk='1' then
+            if io_byte_we /= "0000" then
+                if io_wr_addr(31 downto 16)=X"2001" then
+                    irq_trigger_load <= '1';
+                    irq_trigger_data <= io_wr_data;
+                    irq_trigger_addr <= io_wr_addr(4 downto 2);
+                else
+                    irq_trigger_load <= '0';
+                end if;
+            else
+                irq_trigger_load <= '0';
+            end if;
+        end if;
+    end process simulated_io;
+    
+    -- Simulate IRQs -----------------------------------------------------------
+    irq_trigger_registers:
+    process(clk)
+    variable index : integer range 0 to 7;
+    begin
+        if clk'event and clk='1' then
+            if reset='1' then
+                cpu_irq <= "00000000";
+            else
+                if irq_trigger_load='1' then
+                    index := conv_integer(irq_trigger_addr);
+                    irq_countdown(index) <= irq_trigger_data;
+                else
+                    for index in 0 to 7 loop
+                        if irq_countdown(index) = X"00000001" then
+                            cpu_irq(index) <= '1';
+                            irq_countdown(index) <= irq_countdown(index) - 1;
+                        elsif irq_countdown(index)/=X"00000000" then
+                            irq_countdown(index) <= irq_countdown(index) - 1;
+                            cpu_irq(index) <= '0';
+                        else
+                            cpu_irq(index) <= '0';
+                        end if;
+                    end loop;
+                end if;
+            end if;
+        end if;
+    end process irq_trigger_registers;
 
+    
     -- This is useless (the simulated UART will not be actually used)
     -- but at least prevents the simulator from optimizing the logic away.
     rxd <= txd;
@@ -248,6 +307,5 @@ begin
                          LOG_TRIGGER_ADDRESS, log_file, con_file);
         wait;
     end process log_execution;
-
     
 end architecture testbench;

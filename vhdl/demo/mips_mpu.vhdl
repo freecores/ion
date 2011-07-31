@@ -40,7 +40,7 @@ entity mips_mpu is
     port(
         clk             : in std_logic;
         reset           : in std_logic;
-        interrupt       : in std_logic;
+        interrupt       : in std_logic_vector(7 downto 0);
         
         -- interface to FPGA i/o devices
         io_rd_data      : in std_logic_vector(31 downto 0);
@@ -114,7 +114,7 @@ begin
 
 cpu: entity work.mips_cpu
     port map (
-        interrupt   => '0',
+        interrupt   => interrupt,
         
         data_addr   => cpu_data_addr,
         data_rd_vma => cpu_data_rd_vma,
