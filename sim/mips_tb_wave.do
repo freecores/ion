@@ -20,11 +20,11 @@ add wave -noupdate -color Pink -format Literal /mips_tb/mpu/cache/ps
 add wave -noupdate -format Literal -radix hexadecimal /mips_tb/mpu/cache/data_wr_reg
 add wave -noupdate -format Literal -radix hexadecimal /mips_tb/mpu/cache/data_wr_addr_reg
 add wave -noupdate -expand -group SRAM
-add wave -noupdate -group SRAM -color {Cadet Blue} -format Literal -radix hexadecimal /mips_tb/sram_data_wr
 add wave -noupdate -group SRAM -format Literal -radix hexadecimal /mips_tb/sram_chip_addr
-add wave -noupdate -group SRAM -color {Slate Blue} -format Literal -radix hexadecimal /mips_tb/sram_address
-add wave -noupdate -group SRAM -color Violet -format Literal -expand /mips_tb/sram_byte_we_n
-add wave -noupdate -group SRAM -color {Dark Orchid} -format Logic /mips_tb/sram_oe_n
+add wave -noupdate -group SRAM -format Literal -radix hexadecimal /mips_tb/mpu_sram_data_wr
+add wave -noupdate -group SRAM -format Literal /mips_tb/mpu_sram_byte_we_n
+add wave -noupdate -group SRAM -format Literal -radix hexadecimal /mips_tb/mpu_sram_address
+add wave -noupdate -group SRAM -format Logic /mips_tb/mpu_sram_oe_n
 add wave -noupdate -group I-Cache
 add wave -noupdate -group I-Cache -format Literal /mips_tb/mpu/cache/code_refill_ctr
 add wave -noupdate -group I-Cache -format Logic /mips_tb/mpu/cache/code_wait
@@ -32,7 +32,7 @@ add wave -noupdate -group I-Cache -color Orange -format Logic /mips_tb/mpu/cache
 add wave -noupdate -group I-Cache -format Literal -radix hexadecimal /mips_tb/mpu/cache/code_rd_addr_reg
 add wave -noupdate -format Literal -radix hexadecimal /mips_tb/mpu/cache/bram_rd_addr
 add wave -noupdate -format Literal -radix hexadecimal /mips_tb/mpu/cache/bram_rd_data
-add wave -noupdate -expand -group D-Cache
+add wave -noupdate -group D-Cache
 add wave -noupdate -group D-Cache -format Literal -radix unsigned /mips_tb/mpu/cache/data_line_addr
 add wave -noupdate -group D-Cache -format Literal /mips_tb/mpu/cache/data_refill_ctr
 add wave -noupdate -group D-Cache -format Literal -radix hexadecimal /mips_tb/mpu/cache/data_refill_data
@@ -63,4 +63,4 @@ configure wave -gridperiod 1
 configure wave -griddelta 40
 configure wave -timeline 0
 update
-WaveRestoreZoom {649617152 ps} {849004594 ps}
+WaveRestoreZoom {0 ps} {2940094500 ps}
