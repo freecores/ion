@@ -22,8 +22,16 @@
 # Test that work this way have been commented with this tag: "@log"
 #
 #-------------------------------------------------------------------------------
-# NOTE: NOPs have been inserted after load instructions.
+# @note1: Hardware interrupt simulation 
 #
+#   Hardware interrupts can be triggered by writing to a bank of debug
+#   registers; you can trigger any or all of the 6 hardware interrupts of the
+#   R3000 architecture (i.e. excluding the 2 SW interrupts), with any delay you 
+#   want, measured in instruction cycles, NOT clock cycles. You can make two or 
+#   more IRQs assert at the same time for test purposes.
+#   Both the software simulator and the VHDL simulation test bench implement
+#   these debug registers.
+#   Note again that the delay is given in instruction cycles.
 ################################################################################
 
     #-- Set flags below to >0 to enable/disable test assembly ------------------
@@ -34,8 +42,11 @@
     # WARNING: the assembler expands div instructions, see 'as' manual
     .set TEST_DIV, 1                    # DIV* instructions
     .set TEST_MUL, 1                    # MUL* instructions
+    .set TEST_BAD_OPCODES, 1            # Test opcode emulation trap
+    .set TEST_TRAP_DELAY_EMU, 0         # Test emu of bad opcodes in delay slots
+    .set TEST_HW_INTS, 1                # Test HW interrupts (@note1)
+    
     .set USE_CACHE, 1                   # Initialize and enable cache
-    .set EMU_MIPS32, 1                  # Emulates selected MIPS32 opcodes
     
     .set ICACHE_NUM_LINES, 256              # no. of lines in the I-Cache
     .set DCACHE_NUM_LINES, 256              # no. of lines in the D-Cache
@@ -83,7 +94,7 @@ InterruptVector:
     
     # Unimplemented instruction
 trap_unimplemented:
-    .ifgt   EMU_MIPS32
+    .ifgt   TEST_BAD_OPCODES
     # jump to mips32 opcode emulator with c0_cause in $k0
     j       opcode_emu
     nop
@@ -1241,7 +1252,7 @@ ShiftTest:
     ######################################
     #Emulated MIPS32r2 Instructions
     ######################################
-    .ifgt   EMU_MIPS32
+    .ifgt   TEST_BAD_OPCODES
     ori     $2,$0,'M'
     sb      $2,0($20)
     ori     $2,$0,'i'
@@ -1370,7 +1381,11 @@ test_ins_5:
     
     sb      $23,0($20)
     sb      $21,0($20)
+    
+    # FIXME should test the bad opcode emulation in delay slots
     .endif
+    
+    
     
     # Print 'Done'; the rest of the tests are for log matching only
     ori     $2,$0,'D'
@@ -1564,8 +1579,29 @@ test_b10:
     ori     $v0,0x5503
 test_b11:
 
+    #-- Hardware interrupts -----------------------------------------
+test_hw_irq:
+    .ifgt   TEST_HW_INTS
+    li      $a0,0x20010000      # base address of debug reg block
+    
+    # Trigger IRQ_0 in 10 instruction cycles (@note1)
+    #lhu     $a1,10              # load irq count down register...
+    li      $a1,10
+    sw      $a1,0($a0)
+    lhu     $a2,20
+test_hw_irq_0:
+    bnez    $a2,test_hw_irq_0   # ...and wait for irq to trigger
+    addiu   $a2,$a2,-1
+    
+    # When we arrive here, we should have executed the irq handler if
+    # the irq worked properly, so check it.
+ 
+    # FIXME incomplete code, stopped work here
+    
+    .endif
+
 $DONE:
-    j       $DONE
+    j       $DONE               # End in an infinite loop
     nop
 
 # void setup_cache(void) -- invalidates all I- and D-Cache lines (uses no RAM)
