@@ -196,7 +196,8 @@ typedef struct s_args {
     char *bin_filename[NUM_MEM_BLOCKS];
     /** map file to be used for function call tracing, if any */
     char *map_filename;
-    /** offset into area (in bytes) where bin wile will be loaded */
+    /** offset into area (in bytes) where bin will be loaded */
+    /* only used when loading a linux kernel image */
     uint32_t offset[NUM_MEM_BLOCKS];
 } t_args;
 /** Parse cmd line args globally accessible */
@@ -320,7 +321,7 @@ typedef struct s_trace {
    int pr[32];                            /**< last value of register bank */
    int hi, lo, epc, status;               /**< last value of internal regs */
    int disasm_ptr;                        /**< disassembly pointer */
-   /** Cycles remaining to trigger irq[i], or -1 if irq inactive */
+   /** Instruction cycles remaining to trigger irq[i], or -1 if irq inactive */
    int32_t irq_trigger_countdown[NUM_HW_IRQS];  /**< (in instructions) */
 } t_trace;
 

@@ -24,7 +24,7 @@
 -- you should initialize the cache and enable it ASAP after reset. 
 -- 
 -- 2.- When bits CP0[12].17:16 = "01", the CPU can invalidate a cache line N
--- by writing word N to ANY address. The address will be executed as normal AND
+-- by writing word N to ANY address. The write will be executed as normal AND
 -- the cache controller will invalidate I-Cache line N.
 --
 -- Note that the standard behavior for bits 17 and 16 of the SR is not
