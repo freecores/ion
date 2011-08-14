@@ -17,6 +17,8 @@ vcom -reportprogress 300 -work work ../vhdl/tb/txt_util.vhdl
 vcom -reportprogress 300 -work work ../vhdl/tb/mips_tb_pkg.vhdl
 vlog -reportprogress 300 -work work ../vhdl/tb/models/mt48lc4m16a2.v
 
+vcom -reportprogress 300 -work work ../vhdl/demo/rs232_rx.vhdl
+vcom -reportprogress 300 -work work ../vhdl/demo/rs232_tx.vhdl
 vcom -reportprogress 300 -work work ../vhdl/demo/code_rom_pkg.vhdl
 vcom -reportprogress 300 -work work ../vhdl/demo/mips_mpu.vhdl
 
