@@ -132,7 +132,7 @@ begin
         SRAM_ADDR_SIZE => 32
     )
     port map (
-        interrupt       => cpu_irq(0),
+        interrupt       => cpu_irq,
 
         -- interface to FPGA i/o devices
         io_rd_data      => io_rd_data,
