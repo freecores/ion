@@ -43,8 +43,13 @@ architecture testbench of mips_tb is
 
 -- External SRAM and interface signals -----------------------------------------
 
-signal sram1 : t_sram := ( others => X"00");
-signal sram0 : t_sram := ( others => X"00");
+-- Static 16-bit wide RAM modelled as two separate byte-wide arrays foer easy 
+-- simulation of byte enables.
+-- Using shared variables for big memory arrays speeds up simulation a lot;
+-- see Modelsim 6.3 User Manual, section on 'Modelling Memory'.
+-- WARNING: I have only tested this construct with Modelsim SE 6.3.
+shared variable sram1 : t_sram := ( others => X"00");
+shared variable sram0 : t_sram := ( others => X"00");
 
 signal sram_chip_addr :     std_logic_vector(SRAM_ADDR_SIZE downto 1);
 signal sram_output :        std_logic_vector(15 downto 0);
@@ -54,13 +59,14 @@ signal sram_output :        std_logic_vector(15 downto 0);
 
 -- We'll simulate a 16-bit-wide static PROM (e.g. a Flash) with some serious
 -- cycle time (70 or 90 ns).
-
+-- FIXME FLASH read cycle time not modelled yet.
 signal prom_rd_addr :       t_prom_address; 
 signal prom_output :        std_logic_vector(7 downto 0);
 signal prom_oe_n :          std_logic;
 
-signal prom : t_prom := ( PROM_DATA );
-
+-- 8-bit wide FLASH modelled as read only block.
+-- We don't simulate the actual FLASH chip: no FLASH writes, control regs, etc.
+shared variable prom : t_prom := ( PROM_DATA );
 
 
 -- I/O devices -----------------------------------------------------------------
@@ -216,10 +222,10 @@ begin
         -- FIXME should add OE\ to write control logic
         if mpu_sram_byte_we_n'event or mpu_sram_address'event then
             if mpu_sram_byte_we_n(1)='0' then
-                sram1(conv_integer(unsigned(sram_chip_addr))) <= mpu_sram_data_wr(15 downto  8);
+                sram1(conv_integer(unsigned(sram_chip_addr))) := mpu_sram_data_wr(15 downto  8);
             end if;
             if mpu_sram_byte_we_n(0)='0' then
-                sram0(conv_integer(unsigned(sram_chip_addr))) <= mpu_sram_data_wr( 7 downto  0);
+                sram0(conv_integer(unsigned(sram_chip_addr))) := mpu_sram_data_wr( 7 downto  0);
             end if;            
         end if;
     end process simulated_sram_write;
