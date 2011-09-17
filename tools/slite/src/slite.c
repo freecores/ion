@@ -1654,7 +1654,7 @@ int read_binary_files(t_state *s, t_args *args){
         if(read_map_file(args->map_filename, &map_info)<0){
             printf("Trouble reading map file '%s', quitting!\n",
                    args->map_filename);
-            return 1;
+            return 0;
         }
         printf("Read %d functions from the map file; call trace enabled.\n\n",
                map_info.num_functions);
