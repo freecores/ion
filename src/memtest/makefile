@@ -11,7 +11,8 @@ FLASH_START = 0xb0000000
 # External RAM parameters (size in words)
 XRAM_SIZE = 1024
 XRAM_START = 0x00000000
-
+# Set to > 0 to initialize and enable the cache before running the tests
+TEST_CACHE = 1
 
 LFLAGS = -Ttext $(BRAM_START) -Tdata $(XRAM_START) -eentry -I elf32-big
 LFLAGS_FLASH = -Ttext $(FLASH_START) -eflash_test -I elf32-big
@@ -34,7 +35,7 @@ memtest:  memtest.code memtest.data flash.bin
 #-- Targets for main code to be run from BRAM
 
 memtest.o: memtest.s
-	$(AS) -defsym TEST_CACHE=1 -defsym EXEC_FLASH=$(EXEC_FLASH) \
+	$(AS) -defsym TEST_CACHE=$(TEST_CACHE) -defsym EXEC_FLASH=$(EXEC_FLASH) \
     -defsym XRAM_BASE=$(XRAM_START) -o memtest.o memtest.s
     
 memtest.axf: memtest.o
@@ -52,7 +53,7 @@ memtest.data: memtest.axf
 #-- Targets for code to be run from FLASH 
 
 flash.o: flash.s
-	$(AS) -defsym TEST_CACHE=1 -defsym FLASH_BASE=$(FLASH_START) -o flash.o flash.s
+	$(AS) -defsym TEST_CACHE=$(TEST_CACHE) -defsym FLASH_BASE=$(FLASH_START) -o flash.o flash.s
 
 flash.axf: flash.o
 	$(LD) $(LFLAGS_FLASH) -Map flash.map -s -N -o flash.axf flash.o

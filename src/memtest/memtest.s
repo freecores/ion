@@ -43,6 +43,9 @@
     .set UART_TX,       0x0000              # TX reg offset
     .set UART_STATUS,   0x0020              # status reg offset
 
+    #---- Debug register block -- 4 read-write, 32-bit registers 
+    .set DEBUG_BASE,    0x2000f000          # Debug block base 
+    
     #---------------------------------------------------------------------------
 
     .text
@@ -69,8 +72,10 @@ start_test:
     li      $a0,0x00000002
     mtc0    $a0,$12             # disable interrupts and cache
 
-    .ifdef  TEST_CACHE          # if we're going to test the I-caches then
-    jal     init_cache          # invalidate all the I-Cache lines now
+    .ifdef  TEST_CACHE          # if we're going to test the caches then
+    jal     init_cache          # invalidate all the I- and D-Cache lines now
+    nop
+    jal     test_dcache
     nop
     .endif
 
@@ -238,7 +243,55 @@ $DONE:
     j       $DONE               # ...and freeze here
     nop
 
+test_dcache:
+    # This D-Cache test is extremely simplistic: 
+    # We'll make a few I/O writes to a block of test registers and then readback
+    # all the data. The writes and reads will be done as fast as the CPU can,
+    # i.e. back to back. We rely on the I-Cache being active for this.
+    # Note that, while the CPU 'wants' to do the WR cycles back to back, it 
+    # can't because of the D-Cache stalls. That's the interaction we want to 
+    # test here, for both WR and RD cycles.
 
+    move    $t8,$ra             # Save $ra -- remember, there's no stack
+    la      $a0,msg9            # Display 'testing cache' message
+    jal     puts
+    nop
+    li      $a0,DEBUG_BASE      # We'll use the debug register block as the 
+    li      $a1,0x112200aa      # target of a series of RD and WR cycles.
+    addi    $a2,$a1,0x100       # Load $a1..$a2 with dummy data.
+    addi    $a3,$a2,0x100
+    .align  4                   # Align to 16 bytes (start of I-Cache line)
+    sw      $a1,0x0($a0)        # Perform 3 WR cycles...
+    sw      $a2,0x4($a0)
+    sw      $a3,0x8($a0)
+    
+    lw      $t0,0x0($a0)        # ...followed by a RD cycle 
+    bne     $a1,$t0,test_dcache_ww_error
+    nop
+    lw      $t0,0x4($a0)        # Verify the other 2 WR cycles
+    bne     $a2,$t0,test_dcache_ww_error
+    nop
+    lw      $t0,0x8($a0)
+    bne     $a3,$t0,test_dcache_ww_error
+    nop
+    
+    la      $a0,msg11           # display OK message...
+    jal     puts
+    nop
+    
+test_dcache_done:               # ...and quit.
+    move    $ra,$t8             # Recover $ra and return
+    jr      $ra             
+    nop
+    
+test_dcache_ww_error:           # We'll print the same error for all kinds of
+    la      $a0,msg10           # failure; we'll diagnose it in simulation.
+test_dcache_error:
+    jal     puts
+    nop
+    b       test_dcache_done
+    
+    
     # This short routine will be copied to RAM and then executed there. This
     # will test the behavior of the I-Cache.
 test_exec_sram:
@@ -302,14 +355,15 @@ dump_hex_loop_words:
     jal     puts
     addi    $t7,4
 
+    # Some debug hex dump...
     .ifgt 0
     lw      $ra,4($sp)
     move    $a0,$ra
     li      $a1,8
     jal     put_hex
     nop
-qqqq:
-    j       qqqq
+stop_here:
+    j       stop_here
     nop
     .endif
 
@@ -438,8 +492,15 @@ msg7:
     .asciiz "<end of dump>"
 msg8:
     .ascii  "\n\r"
-    .asciiz "Testing execution from 8-bit static memory (FLASH)\n\r"
+    .asciz  "Testing execution from 8-bit static memory (FLASH)\n\r"
+msg9:
+    .asciz  "Testing D-Cache with back-to-back pairs of RD & WR cycles...\n\r"
+msg10:
+    .asciz  "Error in WR+WR sequence\n\r"
+msg11:
+    .asciz  "OK\n\r"
 
+    
     .set    reorder
     .end    entry
 
