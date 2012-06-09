@@ -79,15 +79,22 @@
 -- the default memory map (namely bit 30 which is always '0').
 --
 --
--- @note3: Possible bug in Quartus-II and workaround
+-- @note3: Synthesis problem in Quartus-II and workaround
 --
 -- I had to put a 'dummy' mux between the cache line store and the CPU in order 
--- to get rid of a quirk in Quartus-II synthseizer (V9.0 build 235).
+-- to get rid of a quirk in Quartus-II synthseizer (several versions).
 -- If we omit this extra dummy layer of logic the synth will fail to infer the 
 -- tag table as a BRAM and will use logic fabric instead, crippling performance.
 -- The mux is otherwise useless and hits performance badly, but so far I haven't
 -- found any other way to overcome this bug, not even with the helop of the  
 -- Altera support forum.
+-- Probable cause of this behavior: according to the Cyclone-II manual (section 
+-- 'M4K Routing Interface'), no direct connection is possible between an M4K 
+-- data output and the address input of another M4K (in this case, the cache 
+-- line BRAM and the register bank BRAM). And apparently Quartus-2 won't insert 
+-- intermediate logic itself for some reason.
+-- This does not happen with ISE on Spartan-3.
+-- FIXME: Move this comment to the relevant section of the doc.
 --
 -- @note4: Startup values for the cache tables
 -- 
@@ -927,7 +934,7 @@ begin
             -- Clear it as soon as the read/refill has STARTED. 
             -- Can be raised again after a read is started and before it's done.
             -- data_rd_addr_reg always has the addr of any pending read.
-            if data_miss='1' then --data_rd_vma='1' then
+            if data_miss='1' then
                 read_pending <= '1';
                 data_rd_addr_reg <= data_addr(31 downto 2);
             elsif data_refill_start='1' or ps=data_read_io_0 or
@@ -938,7 +945,7 @@ begin
             -- Raise 'write_pending' at the 1st cycle of a write, clear it when
             -- the write (writethrough actually) operation has been done.
             -- data_wr_addr_reg always has the addr of any pending write
-            if byte_we/="0000" and ps=idle and write_pending='0' then
+            if byte_we/="0000" then
                 byte_we_reg <= byte_we;
                 data_wr_reg <= data_wr;
                 data_wr_addr_reg <= data_addr(31 downto 2);
@@ -1022,8 +1029,8 @@ bram_data_rd_vma <= '1' when ps=data_refill_bram_1 else '0';
 -- Code cache
 
 -- CPU is wired directly to cache output, no muxes -- or at least is SHOULD. 
--- Due to an apparent bug in Quartus-2 (V9.0 build 235), if we omit this extra
--- dummy layer of logic the synth will fail to infer the tag table as a BRAM.
+-- Due to some unknowk reason, if we omit this extra dummy layer of logic the 
+-- synth (Quartus-II) will fail to infer the tag table as a BRAM.
 -- (@note3)
 code_rd <= code_cache_rd when reset='0' else X"00000000";
 
@@ -1182,13 +1189,13 @@ data_miss_cached <= '1' when
     data_miss_by_invalidation='1'
     else '0';
 
--- Select the proper code_miss signal
+-- Select the proper data_miss source with a mux
 data_miss <= data_miss_uncached when cache_enable='0' else data_miss_cached;
 
 
--- Code line address used for both read and write into the table
+-- Data line address used for both read and write into the table
 data_line_addr <=
-    -- when the CPU wants to invalidate D-Cache lines, the addr comes from the
+    -- When the CPU wants to invalidate D-Cache lines, the addr comes from the
     -- data bus (see @note1)
     data_wr(7 downto 0) when byte_we(3)='1' and ic_invalidate='1' 
     -- otherwise the addr comes from the code address as usual
@@ -1198,6 +1205,7 @@ data_word_addr <= data_addr(11 downto 2);
 data_word_addr_wr <= data_line_addr & conv_std_logic_vector(data_refill_ctr,LINE_INDEX_SIZE);
 -- NOTE: the tag will be marked as INVALID ('1') when the CPU is invalidating 
 -- code lines (@note1)
+-- FIXME explain role of ic_invalidate in this logic
 data_tag <= 
     (ic_invalidate or not data_tag_match_valid) &
     data_addr(31 downto 27) &
@@ -1249,57 +1257,7 @@ with ps select data_refill_data <=
     bram_rd_data    when data_refill_bram_1,
     sram_rd_data    when others;
 
-
-
-
-
---------------------------------------------------------------------------------
---------------------------------------------------------------------------------
--- OLD Data cache (unimplemented -- uses stub cache logic)
-
---  -- CPU data input mux: direct cache output OR uncached io input
---  with ps select data_rd <=
---      io_rd_data      when data_read_io_1,
---      data_cache_rd   when others;
---  
---  -- All the tag match logic is unfinished and will be simplified away in synth.
---  -- The 'cache' is really a single register.
---  data_cache_rd <= data_cache_store;
---  data_cache_tag <= data_cache_tag_store;
---  
---  data_cache_memory:
---  process(clk)
---  begin
---      if clk'event and clk='1' then
---          if reset='1' then
---              -- in the real hardware the tag store can't be reset and it's up
---              -- to the SW to initialize the cache.
---              data_cache_tag_store <= (others => '0');
---              data_cache_store <= (others => '0');
---          else
---              -- Refill data cache if necessary
---              if ps=data_refill_sram_1 or ps=data_refill_sram8_3 then
---                  data_cache_tag_store <=
---                      "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
---                  data_cache_store <= sram_rd_data;
---              elsif ps=data_refill_bram_1 then
---                  data_cache_tag_store <=
---                      "01" & data_rd_addr_reg(t_data_tag'high-2 downto t_data_tag'low);
---                  data_cache_store <= bram_rd_data;
---              end if;
---          end if;
---      end if;
---  end process data_cache_memory;
-
-
-
-
-
-
-
-
-
---------------------------------------------------------------------------------
+------------------------------------------------------------------------------
 --------------------------------------------------------------------------------
 -- SRAM interface
 
@@ -1417,10 +1375,6 @@ io_rd_vma <= '1' when ps=data_read_io_0 else '0';
 --------------------------------------------------------------------------------
 -- CPU stall control
 
--- FIXME data_miss should be raised only on the cycle a data miss is detected,
--- otherwise it overlaps data_wait
---@@@data_miss <= read_pending; -- FIXME stub; will change with real D-Cache
-
 -- Stall the CPU when either state machine needs it
 mem_wait <= 
     (code_wait or data_wait or  -- code or data refill in course
@@ -1460,9 +1414,8 @@ with ps select data_wait <=
     '1' when data_refill_bram_1,
     '1' when data_refill_bram_2,
     '1' when data_read_io_0,
-    -- Otherwise, we stall the CPU the cycle after a RD or WR is triggered
-    read_pending or write_pending when idle,
-    
-    '0' when others;
+    -- In any other state, stall CPU only if there's a RD/WR pending.
+    read_pending or write_pending when others;
+
 
 end architecture direct;
