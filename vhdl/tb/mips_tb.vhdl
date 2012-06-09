@@ -128,6 +128,10 @@ type t_irq_countdown_array  is array(0 to 7) of t_irq_countdown;
 
 signal irq_countdown :      t_irq_countdown_array;
 
+-- Simulated block of 4 read/write, 32-bit I/O registers, used in cache test. 
+type t_debug_reg_block is array(0 to 3) of t_word;
+signal debug_reg_block :    t_debug_reg_block;
+
 
 begin
 
@@ -256,9 +260,13 @@ begin
         if clk'event and clk='1' then
             if io_byte_we /= "0000" then
                 if io_wr_addr(31 downto 16)=X"2001" then
+                    -- IRQ trigger register block (write only)
                     irq_trigger_load <= '1';
                     irq_trigger_data <= io_wr_data;
                     irq_trigger_addr <= io_wr_addr(4 downto 2);
+                elsif io_wr_addr(31 downto 12)=X"2000f" then
+                    -- Debug register block (read/write)
+                    debug_reg_block(conv_integer(unsigned(io_wr_addr(3 downto 2)))) <= io_wr_data;
                 else
                     irq_trigger_load <= '0';
                 end if;
@@ -267,6 +275,10 @@ begin
             end if;
         end if;
     end process simulated_io;
+    
+    -- The only readable i/o is the debug reg block. We simulate an asynchronous
+    -- read port (a mux).
+    io_rd_data <= debug_reg_block(conv_integer(unsigned(io_rd_addr(3 downto 2))));
     
     -- Simulate IRQs -----------------------------------------------------------
     irq_trigger_registers:
