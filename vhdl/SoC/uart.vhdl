@@ -266,7 +266,7 @@ with addr_rd_i select data_o <=
 
 load_tx_reg <= '1' when wr_i = '1' and ce_i = '1' and addr_wr_i = "00" else '0';
 load_stat_reg <= '1' when wr_i = '1' and ce_i = '1' and addr_wr_i = "01" else '0';
-read_rx <= '1' when rd_i = '1' and ce_i = '1' else '0';
+read_rx <= '1' when rd_i = '1' and ce_i = '1' and addr_rd_i = "00" else '0';
 
 rx_irq <= set_rx_rdy_flag;
     
