@@ -12,8 +12,6 @@ add wave -noupdate -color {Light Blue} -format Literal -radix hexadecimal /mips_
 add wave -noupdate -color {Light Blue} -format Literal -radix hexadecimal /mips_tb/log_info.pending_data_wr_pc
 add wave -noupdate -color {Light Blue} -format Literal -radix hexadecimal /mips_tb/log_info.pending_data_wr
 add wave -noupdate -color {Light Blue} -format Literal -radix binary /mips_tb/log_info.pending_data_wr_we
-add wave -noupdate -format Logic /mips_tb/mpu/serial_tx/load
-add wave -noupdate -format Literal -radix ascii /mips_tb/mpu/serial_tx/data_i
 add wave -noupdate -divider Cache
 add wave -noupdate -format Logic /mips_tb/mpu/cache/cache_enable
 add wave -noupdate -color Pink -format Literal /mips_tb/mpu/cache/ps
