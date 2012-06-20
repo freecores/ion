@@ -277,6 +277,7 @@ void slite_sleep(unsigned int value){
 #define DBG_REGS          (0x20010000)
 #define UART_WRITE        (0x20000000)
 #define UART_READ         (0x20000000)
+#define UART_STATUS       (0x20000004)
 #define TIMER_READ        (0x20000100)
 
 #define DEFAULT_TIMER_PRESCALER (50)
@@ -289,8 +290,8 @@ void slite_sleep(unsigned int value){
 #define MMU_FAULT_ADDR    0x20000090
 #define MMU_TLB           0x200000a0
 
-#define IRQ_UART_READ_AVAILABLE  0x001
-#define IRQ_UART_WRITE_AVAILABLE 0x002
+#define IRQ_UART_READ_AVAILABLE  0x002
+#define IRQ_UART_WRITE_AVAILABLE 0x001
 #define IRQ_COUNTER18_NOT        0x004
 #define IRQ_COUNTER18            0x008
 #define IRQ_MMU                  0x200
@@ -334,6 +335,7 @@ typedef struct s_state {
    int delay_slot;              /**< !=0 if prev. instruction was a branch */
    uint32_t instruction_ctr;    /**< # of instructions executed since reset */
    uint32_t inst_ctr_prescaler; /**< Prescaler counter for instruction ctr. */
+   uint32_t debug_regs[16];     /**< Rd/wr debug registers */
 
    int r[32];
    int opcode;
@@ -453,6 +455,7 @@ void reverse_endianess(uint8_t *data, uint32_t bytes);
 int mem_read(t_state *s, int size, unsigned int address, int log);
 void mem_write(t_state *s, int size, unsigned address, unsigned value, int log);
 void debug_reg_write(t_state *s, uint32_t address, uint32_t data);
+int debug_reg_read(t_state *s, int size, unsigned int address);
 void start_load(t_state *s, uint32_t addr, int rt, int data);
 uint32_t simulate_hw_irqs(t_state *s);
 
@@ -534,15 +537,24 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     unsigned int value=0, word_value=0, i, ptr;
     unsigned int full_address = address;
 
+    /* Handle access to debug register block */
+    if((address&0xffff0000)==(DBG_REGS&0xffff0000)){
+        return debug_reg_read(s, size, address);
+    }
+
     s->irqStatus |= IRQ_UART_WRITE_AVAILABLE;
     switch(address){
     case UART_READ:
         /* FIXME Take input from text file */
+        /* Wait for incoming character */
         while(!kbhit());
         HWMemory[0] = getch();
         //s->irqStatus &= ~IRQ_UART_READ_AVAILABLE; //clear bit
         printf("%c", HWMemory[0]);
-        return (HWMemory[0] << 24) | 0x03;
+        return HWMemory[0];
+    case UART_STATUS:
+        /* Hardcoded status bits: tx and rx available */
+        return IRQ_UART_WRITE_AVAILABLE | IRQ_UART_READ_AVAILABLE;
     case TIMER_READ:
         printf("TIMER = %10d\n", s->instruction_ctr);
         return s->instruction_ctr;
@@ -636,6 +648,12 @@ int mem_read(t_state *s, int size, unsigned int address, int log){
     return(value);
 }
 
+int debug_reg_read(t_state *s, int size, unsigned int address){
+    /* FIXME should mirror debug registers 0..3 */
+    return s->debug_regs[(address >> 2)&0x0f];
+}
+
+
 /** Write to debug register */
 void debug_reg_write(t_state *s, uint32_t address, uint32_t data){
 
@@ -647,6 +665,7 @@ void debug_reg_write(t_state *s, uint32_t address, uint32_t data){
     else{
         /* all other registers are used for display (like LEDs) */
         printf("DEBUG REG[%04x]=%08x\n", address & 0xffff, data);
+        s->debug_regs[(address >> 2)&0x0f] = data;
     }
 }
 
