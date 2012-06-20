@@ -10,8 +10,8 @@
     \caption{CPU module interface\label{cpu_symbol}}
     \end{figure}
     
-    the CPU module is not meant to be used directly. Instead, the MCU module
-    described in section ~\ref{mcu_module} should be used.\\
+    the CPU module is not meant to be used directly. Instead, the SoC module
+    described in chapter ~\ref{soc_module} should be used.\\
     
     The following sections will describe the CPU structure and interfaces.\\
     
@@ -46,7 +46,7 @@
     Note that the basic cpu module (mips\_cpu) is meant to be connected to 
     internal, synchronous BRAMs only (i.e. the cache BRAMs). Some of its 
     outputs are not registered because they needn't be. The parent module 
-    (called 'mips\_mcu') has its outputs registered to limit $t_{co}$ to 
+    (called 'mips\_soc') has its outputs registered to limit $t_{co}$ to 
     acceptable values.\\
 
 
@@ -171,9 +171,9 @@
     stages as long as it is active. It is meant to be used by the cache at cache 
     refills.\\
 
-    In short, the cache/memory controller stops the cpu for all data/code 
+    The cache/memory controller stops the cpu for all data/code 
     misses for as long as it takes to do a line refill. The current cache 
-    implementation does refills in order (i.e. not 'target address first').
+    implementation does refills in reverse order (i.e. not 'target address first').
 
     Note that external memory wait states are a separate issue. They too are 
     handled in the cache/memory controller. See section~\ref{cache} on the memory
@@ -254,7 +254,7 @@
 \end{verbatim}\\
 
     In the source code, all registers and signals in stage 
-    \textless i\textgreater are prefixed by 
+    \textless i\textgreater  are prefixed by 
     "p\textless i\textgreater\_", as in p0\_*, p1\_* and p2\_*. 
     A stage includes a set of registers and 
     all the logic that feeds from those registers (actually, all the logic
@@ -271,9 +271,12 @@
     ports belong logically to stage 1 and the write port to stage 2.\\
     
     IMPORTANT: though the register bank read port is synchronous, its data can
-    be used in stage 1 because it is read early (the read port is loaded at the 
+    be used in stage 1 because it is read early (the read address port is loaded at the 
     same time as the instruction opcode). That is, a small part of the 
-    instruction decoding is done on stage FETCH-1. Bearing in mind that the code 
+    instruction decoding is done on stage FETCH-1, by feeding the source 
+    register index field straight from the code bus to the register bank BRAM. 
+    
+    Bearing in mind that the code cache 
     ram is meant to be the exact same type of block as the register bank (or 
     faster if the register bank is implemented with distributed RAM), and we 
     will cram the whole ALU delay plus the reg bank delay in stage 1, it does 
@@ -454,7 +457,7 @@
     saved to EPF is not the victim instruction's but the preceding jump 
     instruction's as explained in \cite[p.~64]{see_mips_run}.\\
     
-    Plasma used to save in epc the address of the instruction after break or 
+    Plasma CPU used to save in epc the address of the instruction after break or 
     syscall, and used an unstandard vector address (0x03c). This core will go 
     the standard R3000 way instead.\\
     

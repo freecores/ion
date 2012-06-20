@@ -1,11 +1,11 @@
 \clearpage
 This file contains usage instructions and notes about the Ion CPU core project.
-The core structure is briefly explained in sections 1 to 4. The rest of this 
+The core structure is briefly explained in sections 1 to 5. The rest of this 
 doc describes other aspects of the project: code samples, utility scripts, 
 etc.\\
 
-This document is not yet a full reference on the Ion core. Instead, it should be 
-taken as a companion and commentary to the source code.\\
+This document is not yet a full reference on the Ion core or a data sheet. 
+Instead, it should be taken as a companion and commentary to the source code.\\
 
 This document assumes you know in some depth the MIPS-I architecture. Terms and
 concepts from \cite['See MIPS Run']{see_mips_run} and 
@@ -36,9 +36,9 @@ MIPS derivative:\\
     \item All unimplemented opcodes trigger the proper traps.
     \item Includes minimalistic memory handler with interfaces for external 
           SRAM (or FLASH) on 8- and 16-bit data bus.
-    \item Size and speed compares favorably to other free MIPS cores.
+    \item Size and speed comparable to other free MIPS cores.
     \item Fully sinchronous (rising clock edge only). No latches.
-    \item Source HDL is vendor independent (Though it has only been tested on 
+    \item Source HDL is fully vendor independent (Only tested on 
           Xilinx and Altera synthesis tools).
 \end{enumerate}
 \end{framed}
@@ -71,7 +71,7 @@ subsequent versions:
     \item Hardware interrupts not implemented.
     \item Memory handler does not support dynamic RAM.
     \item Caches are not configurable or parametrizable.
-    \item Documentation is disastrously inadequate.
+    \item Real documentation (specs doc \& data sheet) missing.
 \end{enumerate}
 \end{framed}
 
