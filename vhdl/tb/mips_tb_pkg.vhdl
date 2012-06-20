@@ -53,8 +53,8 @@ package mips_tb_pkg is
 -- truncated.
 constant CONSOLE_LOG_LINE_SIZE : integer := 1024*4;
 
-
 type t_pc_queue is array(0 to 3) of t_word;
+
 
 type t_log_info is record
     rbank :                 t_rbank;
@@ -414,16 +414,16 @@ begin
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p2_data_word_rd", signal_name&".word_loaded", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/data_addr", signal_name&".present_data_rd_addr", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_exception", signal_name&".exception", 0);
-    init_signal_spy("/"&mcu_entity&"/uart_write", signal_name&".uart_tx", 0);
+    init_signal_spy("/"&mcu_entity&"/uart/load_tx_reg", signal_name&".uart_tx", 0);
     init_signal_spy("/"&mcu_entity&"/mpu_io_wr_data", signal_name&".io_wr_data", 0);
     
     -- We force both 'rdy' uart outputs to speed up the simulation (since the
     -- UART operation is not simulated, just logged).
-    signal_force("/"&mcu_entity&"/uart_tx_rdy", "1", 0 ms, freeze, -1 ms, 0);
-    signal_force("/"&mcu_entity&"/uart_rx_rdy", "1", 0 ms, freeze, -1 ms, 0);
+    signal_force("/"&mcu_entity&"/uart/rx_rdy_flag", "1", 0 ms, freeze, -1 ms, 0);
+    signal_force("/"&mcu_entity&"/uart/tx_busy", "0", 0 ms, freeze, -1 ms, 0);
     -- And we force the UART RX data to a predictable value until we implement
     -- UART RX simulation, eventually.
-    signal_force("/"&mcu_entity&"/uart_data_rx", "00000000", 0 ms, freeze, -1 ms, 0);
+    signal_force("/"&mcu_entity&"/uart/rx_buffer", "00000000", 0 ms, freeze, -1 ms, 0);
     
     while done='0' loop
         wait until clk'event and clk='1';

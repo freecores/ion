@@ -1,8 +1,8 @@
 --##############################################################################
 -- ION MIPS-compatible CPU demo on Terasic DE-1 Cyclone-II starter board
 --##############################################################################
--- This module is little more than a wrapper around the CPU and its memories.
--- Synthesize with 'balanced' optimization for best results.
+-- This module is little more than a wrapper around the SoC.
+-- Synthesize with 'speed' optimization for best results.
 --------------------------------------------------------------------------------
 -- NOTE: See note at bottom of file about optional use of PLL.
 --##############################################################################
@@ -35,6 +35,7 @@ use ieee.std_logic_1164.all;
 use ieee.std_logic_arith.all;
 use ieee.std_logic_unsigned.all;
 use work.mips_pkg.all; -- Only needed if port debug_info is not OPEN
+use work.obj_code_pkg.all;
 
 -- FPGA i/o for Terasic DE-1 board
 -- (Many of the board's i/o devices will go unused in this demo)
@@ -222,8 +223,9 @@ end function nibble_to_7seg;
 
 begin
 
-    mpu: entity work.mips_mpu
+    mpu: entity work.mips_soc
     generic map (
+        OBJ_CODE       => obj_code,
         CLOCK_FREQ     => CLOCK_FREQ,
         SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
     )
@@ -264,8 +266,8 @@ process(clk)
 begin
     if clk'event and clk='1' then
         if io_byte_we/="0000" and io_wr_addr(15 downto 12)=X"2" then
-            reg_display(15 downto 0) <= io_wr_data(15 downto 0);
-            --reg_display <= mpu_sram_address;
+            --reg_display(15 downto 0) <= io_wr_data(15 downto 0);
+            reg_display <= mpu_sram_address;
         end if;
     end if;
 end process hex_display_register;    
@@ -456,8 +458,8 @@ green_leds <= reg_gleds;
 
 -- Show contents of debug register in hex display
 display_data <= 
-    reg_display(15 downto 0);-- when switches(0)='0' else 
-    --reg_display(31 downto 16);
+    reg_display(15 downto 0) when switches(0)='0' else 
+    reg_display(31 downto 16);
 
 
 -- 7-segment encoders; the dev board displays are not multiplexed or encoded

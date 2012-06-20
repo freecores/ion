@@ -40,7 +40,7 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use work.mips_pkg.all;
 
-package sim_params_pkg is
+package obj_code_pkg is
 
 -- Hardcoded simulation parameters ---------------------------------------------
 
@@ -51,10 +51,6 @@ constant T : time               := (1.0e9/real(CLOCK_RATE)) * 1 ns;
 
 -- Other simulation parameters -------------------------------------------------
 
-constant SIMULATION_LENGTH : integer := 90000;
-constant LOG_TRIGGER_ADDRESS : t_word := X"bfc00000";
-constant SRAM_SIZE : integer := 1024;
-constant PROM_SIZE : integer := 0;
 constant BRAM_SIZE : integer := 2048;
 
 
@@ -522,8 +518,6 @@ constant obj_code : t_obj_code(0 to 3678) := (
   X"64", X"21", X"0a", X"0a", X"0a", X"00", X"00", X"00", 
   X"28", X"6e", X"75", X"6c", X"6c", X"29", X"00" );
 
-constant sram_init : t_obj_code(0 to 0) := (others => X"00");
-constant prom_init : t_obj_code(0 to 0) := (others => X"00");
 
 
-end package sim_params_pkg;
+end package obj_code_pkg;
