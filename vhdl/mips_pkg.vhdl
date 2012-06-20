@@ -44,7 +44,8 @@ package mips_pkg is
 ---- Basic types ---------------------------------------------------------------
 
 subtype t_word is std_logic_vector(31 downto 0);
-
+subtype t_halfword is std_logic_vector(15 downto 0);
+subtype t_byte is std_logic_vector(7 downto 0);
 
 ---- System configuration constants --------------------------------------------
 
@@ -57,6 +58,53 @@ constant RESET_VECTOR_M4 : t_word   := X"bfbffffc";
 
 -- Trap vector address (0x0000003c for Plasma, 0xbfc00180 for mips1)
 constant TRAP_VECTOR : t_word       := X"bfc00180";
+
+-- Object code in bytes, i.e. as read from a binary or HEX file.
+-- This type is used to define BRAM init constants from external scripts.
+type t_obj_code is array(integer range <>) of std_logic_vector(7 downto 0);
+
+-- Types used to define memories for synthesis or simulation.
+type t_word_table is array(integer range <>) of t_word;
+type t_hword_table is array(integer range <>) of t_halfword;
+type t_byte_table is array(integer range <>) of t_byte;
+
+---- Object code management -- initialization helper functions -----------------
+
+-- Dummy t_obj_code constant, to be used essentially as a syntactic placeholder.
+constant default_object_code : t_obj_code(0 to 3) := (
+    X"00", X"00", X"00", X"00"
+    );
+
+-- Builds BRAM initialization constant from a constant CONSTRAINED byte array
+-- containing the application object code.
+-- The constant is a 32-bit, big endian word table.
+-- The object code is placed at the beginning of the BRAM and the rest is
+-- filled with zeros.
+-- The object code is truncated if it doesn't fit the given table size.
+-- CAN BE USED IN SYNTHESIZABLE CODE to compute a BRAM initialization constant 
+-- from a constant argument.
+function objcode_to_wtable(oC : t_obj_code; size : integer) return t_word_table;
+
+-- Builds BRAM initialization constant from a constant CONSTRAINED byte array
+-- containing the application object code.
+-- The constant is a 32-bit, big endian word table.
+-- The object code is placed at the beginning of the BRAM and the rest is
+-- filled with zeros.
+-- The object code is truncated if it doesn't fit the given table size.
+-- CAN BE USED IN SYNTHESIZABLE CODE to compute a BRAM initialization constant 
+-- from a constant argument.
+function objcode_to_htable(oC : t_obj_code; size : integer) return t_hword_table;
+
+-- Builds BRAM initialization constant from a constant CONSTRAINED byte array
+-- containing the application object code.
+-- The constant is an 8-bit byte table.
+-- The object code is placed at the beginning of the BRAM and the rest is
+-- filled with zeros.
+-- The object code is truncated if it doesn't fit the given table size.
+-- CAN BE USED IN SYNTHESIZABLE CODE to compute a BRAM initialization constant 
+-- from a constant argument.
+function objcode_to_btable(oC : t_obj_code; size : integer) return t_byte_table;
+
 
 
 ---- Address decoding ----------------------------------------------------------
@@ -201,5 +249,77 @@ begin
     end if;
 
 end function decode_addr;
+
+function objcode_to_wtable(oC : t_obj_code; 
+                           size : integer) 
+                           return t_word_table is
+variable br : t_word_table(integer range 0 to size-1):=(others => X"00000000");
+variable i, address, index : integer;
+begin
+    
+    -- Copy object code to start of BRAM...
+    i := 0;
+    for i in 0 to oC'length-1 loop
+        case i mod 4 is
+        when 0 =>       index := 24;
+        when 1 =>       index := 16;
+        when 2 =>       index := 8;
+        when others =>  index := 0;
+        end case;
+        
+        address := i / 4;
+        if address >= size then
+            exit;
+        end if;
+        br(address)(index+7 downto index) := oC(i);
+    end loop;
+    
+    return br;
+end function objcode_to_wtable;
+
+
+function objcode_to_htable(oC : t_obj_code; 
+                           size : integer) 
+                           return t_hword_table is
+variable br : t_hword_table(integer range 0 to size-1):=(others => X"0000");
+variable i, address, index : integer;
+begin
+    
+    -- Copy object code to start of BRAM...
+    i := 0;
+    for i in 0 to oC'length-1 loop
+        case i mod 2 is
+        when 1 =>       index := 8;
+        when others =>  index := 0;
+        end case;
+        
+        address := i / 2;
+        if address >= size then
+            exit;
+        end if;
+        br(address)(index+7 downto index) := oC(i);
+    end loop;
+
+    
+    return br;
+end function objcode_to_htable;
+
+function objcode_to_btable(oC : t_obj_code; 
+                           size : integer) 
+                           return t_byte_table is
+variable br : t_byte_table(integer range 0 to size-1):=(others => X"00");
+variable i, address, index : integer;
+begin
+    
+    -- Copy object code to start of table, leave the rest of the table
+    for i in 0 to oC'length-1 loop
+        if i >= size then
+            exit;
+        end if;
+        br(i) := oC(i);
+    end loop;
+    
+    return br;
+end function objcode_to_btable;
 
 end package body;
