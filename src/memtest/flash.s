@@ -32,7 +32,8 @@
     #---- UART stuff
     .set UART_BASE,     0x20000000          # UART base address
     .set UART_TX,       0x0000              # TX reg offset
-    .set UART_STATUS,   0x0020              # status reg offset
+    .set UART_STATUS,   0x0004              # status reg offset
+    .set UART_TX_RDY,   0x0001              # tx ready flag mask
 
     #---------------------------------------------------------------------------
 
@@ -253,7 +254,7 @@ puts_loop:
     addiu   $a0,1
 puts_wait_tx_rdy:    
     lw      $v1,UART_STATUS($a2)
-    andi    $v1,$v1,0x02
+    andi    $v1,$v1,UART_TX_RDY
     beqz    $v1,puts_wait_tx_rdy
     nop
     sw      $v0,UART_TX($a2)
@@ -279,7 +280,7 @@ put_hex_loop:
     lb      $v0,0($s2)
 put_hex_wait_tx_rdy:
     lw      $v1,UART_STATUS($a2)
-    andi    $v1,$v1,0x02
+    andi    $v1,$v1,UART_TX_RDY
     beqz    $v1,put_hex_wait_tx_rdy
     nop
     sw      $v0,UART_TX($a2)

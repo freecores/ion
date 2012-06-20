@@ -41,10 +41,11 @@
     #---- UART stuff
     .set UART_BASE,     0x20000000          # UART base address
     .set UART_TX,       0x0000              # TX reg offset
-    .set UART_STATUS,   0x0020              # status reg offset
+    .set UART_STATUS,   0x0004              # status reg offset
+    .set UART_TX_RDY,   0x0001              # tx ready flag mask
 
     #---- Debug register block -- 4 read-write, 32-bit registers 
-    .set DEBUG_BASE,    0x2000f000          # Debug block base 
+    .set DEBUG_BASE,    0x20010020          # Debug block base 
     
     #---------------------------------------------------------------------------
 
@@ -396,11 +397,26 @@ inv_i_cache_loop:
     blt     $a2,$a1,inv_i_cache_loop
     addi    $a2,1
 
+    # Now, the D-Cache is different. To invalidate a D-Cache line you just 
+    # read from it (by proper selection of a dummy target address)  while bits 
+    # CP0[12].17:16=01. The data read is undefined and should be discarded.
+
+    li      $a0,0               # Use any base address that is mapped
+    li      $a2,0
+    li      $a1,DCACHE_NUM_LINES-1
+    
+inv_d_cache_loop:
+    lw      $zero,0($a0)
+    addi    $a0,DCACHE_LINE_SIZE*4
+    blt     $a2,$a1,inv_d_cache_loop
+    addi    $a2,1        
+    
+    lui     $a1,0x0002          # Leave with cache enabled
     mfc0    $a0,$12
-    li      $a1,0x00020000      # Leave cache enabled
-    or      $a0,$a0,$a1
+    andi    $a0,$a0,0xffff
+    or      $a1,$a0,$a1
     jr      $ra
-    mtc0    $a0,$12
+    mtc0    $a1,$12
 
 
 
@@ -420,7 +436,7 @@ puts_loop:
     addiu   $a0,1
 puts_wait_tx_rdy:
     lw      $v1,UART_STATUS($a2)
-    andi    $v1,$v1,0x02
+    andi    $v1,$v1,UART_TX_RDY
     beqz    $v1,puts_wait_tx_rdy
     nop
     sw      $v0,UART_TX($a2)
@@ -446,7 +462,7 @@ put_hex_loop:
     lb      $v0,0($s2)
 put_hex_wait_tx_rdy:
     lw      $v1,UART_STATUS($a2)
-    andi    $v1,$v1,0x02
+    andi    $v1,$v1,UART_TX_RDY
     beqz    $v1,put_hex_wait_tx_rdy
     nop
     sw      $v0,UART_TX($a2)

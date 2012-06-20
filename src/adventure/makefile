@@ -12,7 +12,7 @@ SIM_LENGTH = 400000000
 
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
-CODE_BRAM_SIZE = 2048
+CODE_BRAM_SIZE = 512
 # External RAM parameters (size in words)
 XRAM_SIZE = 200000 
 XRAM_START = 0x00000000
@@ -102,26 +102,23 @@ bootstrap: bootstrap.axf
 
 
 
-# Create VHDL file for simulation test bench using TB2 template
+#-- Create VHDL package with data and parameters for simulation
 sim: bootstrap adventure demo
-	$(TO_VHDL) --code bootstrap.code --log_trigger=b0000000 \
-		--flash adventure.bin --flash_size $(FLASH_SIM_SIZE) \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
-		-o $(TB_DIR)\\mips_tb2.vhdl -e dummy -n "Adventure"
-	$(TO_VHDL) --code bootstrap.code --log_trigger=b0000000 \
-		--flash adventure.bin --flash_size $(FLASH_SIM_SIZE) \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)\\sim_params_template.vhdl \
-		-o $(TB_DIR)\\sim_params_pkg.vhdl -e dummy -n "Adventure"
+	$(VHDL_OBJ_PKG) --project="Adventure" \
+		--package sim_params_pkg \
+		--bin bootstrap.code --name obj_code --bram_size $(CODE_BRAM_SIZE) \
+		--name sram_init --xram_size $(XRAM_SIZE) \
+		--bin adventure.bin --name prom_init --flash_size $(FLASH_SIM_SIZE) \
+		--output $(TB_DIR)/sim_params_pkg.vhdl \
+		-s $(SIM_LENGTH) --log_trigger=0xb0000000 \
 
 
 # Create VHDL file for hardware demo
 demo: bootstrap adventure
-	$(TO_VHDL) --code bootstrap.code \
-	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-	-v $(SRC_DIR)/code_rom_template.vhdl -n "Adventure" \
-	-o $(DEMO_DIR)/code_rom_pkg.vhdl
+	$(VHDL_OBJ_PKG) --project="Adventure" \
+		--package obj_code_pkg \
+		--bin bootstrap.code --name obj_code \
+		--output $(DEMO_DIR)/../SoC/bootstrap_code_pkg.vhdl
 
 
 #-- And now the usual housekeeping stuff ---------------------------------------

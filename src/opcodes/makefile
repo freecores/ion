@@ -7,7 +7,7 @@ SIM_LENGTH = 140000
 	
 # FPGA Block RAM parameters
 BRAM_START = 0xbfc00000
-CODE_BRAM_SIZE = 2048
+CODE_BRAM_SIZE = 4096
 # External RAM parameters (size in words)
 XRAM_SIZE = 1024
 XRAM_START = 0x00000000	
@@ -28,17 +28,15 @@ opcodes:
 	$(COPY) -I elf32-big -O binary opcodes.axf opcodes.bin
 	$(COPY) -I elf32-big -j.data -j.bss -O binary opcodes.axf opcodes.data
 
-# Create VHDL file for simulation test bench from TB2 template
+#-- Create VHDL package with data and parameters for simulation
 sim: opcodes
-	$(TO_VHDL) --code opcodes.bin --data opcodes.data --log_trigger=0xbfc00000 \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(DATA_BRAM_SIZE) \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)/sim_params_template.vhdl \
-		-o $(TB_DIR)\\sim_params_pkg.vhdl -e dummy -n "Opcode tester"
-	$(TO_VHDL) --code opcodes.bin --data opcodes.data --log_trigger=0xbfc00000 \
-	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-	-v $(SRC_DIR)/code_rom_template.vhdl -n "Opcode tester" \
-	-o $(DEMO_DIR)/code_rom_pkg.vhdl 
-
+	$(VHDL_OBJ_PKG) --project="Opcode tester" \
+		--package sim_params_pkg \
+		--bin opcodes.bin --name obj_code --bram_size $(CODE_BRAM_SIZE) \
+		--bin opcodes.data --name sram_init --xram_size $(XRAM_SIZE) \
+		--name prom_init --flash_size 0 \
+		--output $(TB_DIR)/sim_params_pkg.vhdl \
+		-s $(SIM_LENGTH) --log_trigger=0xbfc00000 \
 
         
 #-- And now the usual housekeeping stuff ---------------------------------------

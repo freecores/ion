@@ -27,12 +27,12 @@ int putchar(int c){
 /** Replacement for the standard C library getchar. */
 int getchar(void){
     uint32_t uart;
+    uint8_t c;
     
     while(1){
         uart = *((volatile uint32_t *)UART_STATUS);
         if(uart & UART_RXRDY_MASK) break;
     }
-    uart = *((volatile uint32_t *)UART_RX);
-    uart = (uart >> 24) & 0x0ff;
-    return (int)uart;
+    c = *((volatile uint8_t *)UART_RX);
+    return (int)c;
 }

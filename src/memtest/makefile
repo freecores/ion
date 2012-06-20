@@ -4,12 +4,16 @@ include ../common/makefile
 # We'll run the simulation for long enough to complete the test
 SIM_LENGTH = 400000
 
-# FPGA Block RAM parameters
+# FPGA Block RAM parameters (size in words)
 BRAM_START = 0xbfc00000
 CODE_BRAM_SIZE = 2048
+# Simulated FLASH parameters (size in bytes)
 FLASH_START = 0xb0000000
-# External RAM parameters (size in words)
-XRAM_SIZE = 1024
+FLASH_SIZE = 4096
+# External RAM parameters (size in 16-bit halfwords)
+# This is the RAM size simulated by slite; set the same value so the execution
+# logs match.
+XRAM_SIZE = 2048
 XRAM_START = 0x00000000
 # Set to > 0 to initialize and enable the cache before running the tests
 TEST_CACHE = 1
@@ -66,26 +70,23 @@ flash.bin: flash.axf
     
 #-- Targets that build the synthesizable vhdl; meant for direct invocation -----
     
-# Create VHDL file for simulation test bench using TB2 template
+#-- Create VHDL package with data and parameters for simulation
 sim: memtest demo
-	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xbfc00000 \
-		--flash flash.bin --flash_size 4096 \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)\\mips_tb2_template.vhdl \
-		-o $(TB_DIR)\\mips_tb2.vhdl -e mips_tb2
-	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xbfc00000 \
-		--flash flash.bin --flash_size 4096 \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)/sim_params_template.vhdl \
-		-o $(TB_DIR)/sim_params_pkg.vhdl -e mips_tb2
+	$(VHDL_OBJ_PKG) --project="Memtest" \
+		--package sim_params_pkg \
+		--bin memtest.code --name obj_code --bram_size $(CODE_BRAM_SIZE) \
+		--bin memtest.data --name sram_init --xram_size $(XRAM_SIZE) \
+		--bin flash.bin --name prom_init --flash_size $(FLASH_SIZE) \
+		--output $(TB_DIR)/sim_params_pkg.vhdl \
+		-s $(SIM_LENGTH) --log_trigger=0xbfc00000 \
 
 
-# Create VHDL file for hardware demo
+#-- Create VHDL package with data and parameters for syntesis 
 demo: memtest
-	$(TO_VHDL) --code memtest.code --data memtest.data --log_trigger=0xb0000000 \
-	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-	-v $(SRC_DIR)/code_rom_template.vhdl  -n "Memory test" \
-	-o $(DEMO_DIR)/code_rom_pkg.vhdl
+	$(VHDL_OBJ_PKG) --project="Memtest" \
+		--package obj_code_pkg \
+		--bin memtest.code --name obj_code --bram_size $(CODE_BRAM_SIZE) \
+		--output $(DEMO_DIR)/../SoC/bootstrap_code_pkg.vhdl
 
     
 #-- And now the usual housekeeping stuff ---------------------------------------

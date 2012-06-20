@@ -10,4 +10,6 @@ eventually jump to flash (see the sources and makefile) so if you leave it
 unprogrammed you will skip the final part of the test (execution from 8-bit 
 static memory).
 
-
+Note that the very first test, "Testing D-Cache with back-to-back pairs of RD &
+WR cycles" WILL fail in the hardware demo because it relies on debug registers
+only present in the simulation test bench.

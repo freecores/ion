@@ -40,7 +40,6 @@ AS = $(BIN_MIPS)/mips-sde-elf-as
 LD = $(BIN_MIPS)/mips-sde-elf-ld
 DUMP = $(BIN_MIPS)/mips-sde-elf-objdump
 COPY = $(BIN_MIPS)/mips-sde-elf-objcopy
-TO_VHDL   = python ../bin2hdl.py
 
 else
 #**** Customize for Linux
@@ -54,15 +53,19 @@ AS = $(BIN_MIPS)/mips-unknown-linux-uclibc-as
 LD = $(BIN_MIPS)/mips-unknown-linux-uclibc-ld
 DUMP = $(BIN_MIPS)/mips-unknown-linux-uclibc-objdump
 COPY = $(BIN_MIPS)/mips-unknown-linux-uclibc-objcopy
-TO_VHDL = python ../bin2hdl.py
 
 endif
+
+### VHDL source file manipulation tools ########################################
+ION_TOOLS = ../../tools
+TO_VHDL = python $(ION_TOOLS)/bin2hdl/bin2hdl.py
+VHDL_OBJ_PKG = python $(ION_TOOLS)/build_pkg/build_pkg.py -t $(ION_TOOLS)/build_pkg/templates
 
 ### Default system parameters -- to be replaced in application makefile ########
 
 # 'CODE_BRAM' is meant to be a small BRAM (2 to 4KB) used for bootstrapping.
 # 'DATA_BRAM' is a small BRAM connected to the data ports, used for debugging.
-# 'XRAM' is meant to be the main external RAM, either SRAM or SDRAM.
+# 'XRAM' is meant to be external SRAM
 
 
 # Default location of code BRAM is on the reset vector address
@@ -73,7 +76,7 @@ CODE_BRAM_SIZE = 1024
 DATA_BRAM_SIZE = 256
 # Default address of BRAM -- used in some simulation-only tests, see makefiles
 DATA_BRAM_ADDRESS = 0x10000
-# Default size of data external RAM (XRAM) in 32-bit words (for simulation)
+# Default size of data external SRAM (XRAM) in 16-bit words (for simulation)
 XRAM_SIZE = 2048
 # Default address of XRAM
 XRAM_ADDRESS = 0x80000000
@@ -93,7 +96,7 @@ LINK_SCRIPT = $(SRC_DIR)/common/flash.lds
 
 ### Build options -- to be replaced in application makefile ####################
 
-# Don't use gcc builtin functions, and try to target MIPS-I architecture
+# Don't use gcc builtin functions, and try to target MIPS-I architecture.
 # This will prevent usage of unimplemented opcodes but will insert nops after
 # load instructions, which Ion does not need.
 # (See comment above about -G0 flag)

@@ -67,32 +67,34 @@ hello.o: hello.c
 
 #-- Targets that build the synthesizable vhdl; meant for direct invocation -----
 
-#-- Create VHDL file for simulation test bench using TB2 template
+#-- Create VHDL package with data and parameters for simulation 
 sim: hello demo
-	$(TO_VHDL) --code hello.code --data hello.data \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-		--log_trigger=0xbfc00000 \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)/mips_tb2_template.vhdl \
-		-o $(TB_DIR)/mips_tb2.vhdl -e mips_tb2
-	$(TO_VHDL) --code hello.code --data hello.data \
-		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-		--log_trigger=0xbfc00000 \
-		-s $(SIM_LENGTH) -v $(SRC_DIR)/sim_params_template.vhdl \
-		-o $(TB_DIR)/sim_params_pkg.vhdl -e mips_tb2
+	$(VHDL_OBJ_PKG) --project="Hello World" \
+		--package sim_params_pkg \
+		--bin hello.code --name obj_code --bram_size $(CODE_BRAM_SIZE) \
+		--bin hello.data --name sram_init --xram_size $(XRAM_SIZE)\
+		--name prom_init --flash_size 0 \
+		--output $(TB_DIR)/sim_params_pkg.vhdl \
+		-s $(SIM_LENGTH) --log_trigger=0xbfc00000 \
 
 #-- Create VHDL file for simulation test bench using TB0 template
+#-- This will instantiate the CPU without any caches or memory controller and
+#-- will run the program off of an initialized ROM connected to the code 
+#-- interface.
+#-- NOTE: This target has not been used in some time and may be broken. It's 
+#-- here because it can still be useful in an emergency.
 sim_bram: hello
 	$(TO_VHDL) --code hello.code --data hello.data \
 		--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
 		-s $(SIM_LENGTH) -v $(SRC_DIR)/mips_tb0_template.vhdl \
 		-o $(TB_DIR)/mips_tb2.vhdl -e mips_tb2
 
-#-- Create VHDL file for hardware demo
+#-- Create VHDL package with data and parameters for simulation and syntesis
 demo: hello
-	$(TO_VHDL) --code hello.code --data hello.data \
-	--code_size $(CODE_BRAM_SIZE) --data_size $(XRAM_SIZE) \
-	-v $(SRC_DIR)/code_rom_template.vhdl -n "Hello World" \
-	-o $(DEMO_DIR)/code_rom_pkg.vhdl
+	$(VHDL_OBJ_PKG) --project="Hello World" \
+		--package obj_code_pkg \
+		--bin hello.code --name obj_code --bram_size $(CODE_BRAM_SIZE) \
+		--output $(DEMO_DIR)/../SoC/bootstrap_code_pkg.vhdl
 
 
 #-- And now the usual housekeeping stuff ---------------------------------------
