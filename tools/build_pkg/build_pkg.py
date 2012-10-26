@@ -241,7 +241,7 @@ def main(argv):
     target_filename = None
     
     package_params = {
-        'bram_size': 1024,
+        'boot_bram_size': 1024,
         'xram_size': 0,
         'flash_size': 0,
         'trigger_address': None,
@@ -307,9 +307,9 @@ def main(argv):
     for block in blocks:           
         if block.has_key('bin_filename'):
             if block['bin_filename']:
-                (xcode, _, _, top) = read_bin_file(block['bin_filename']);
+                (xcode, size, _, top) = read_bin_file(block['bin_filename']);
                 block['data'] = xcode
-                block['top'] = top
+                block['top'] = size
         else:
             # Named block is empty
             block['data'] = []
