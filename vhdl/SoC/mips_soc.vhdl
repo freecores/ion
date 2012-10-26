@@ -18,7 +18,7 @@
 ------------
 --
 -- BOOT_BRAM_SIZE:  Size of boot BRAM in 32-bit words. Can't be zero.
--- OBJ_CODE:        Bootstrap object code (mapped at 0xbfc00000).
+-- OBJECT_CODE:     Bootstrap object code (mapped at 0xbfc00000).
 -- SRAM_ADDR_SIZE:  Size of address bus for SRAM interface.
 -- CLOCK_FREQ:      Clock rate in Hz. Used for the UART configuration.
 -- BAUD_RATE:       UART baud rate.
@@ -91,7 +91,7 @@ entity mips_soc is
         BAUD_RATE :         integer := 19200;
         BOOT_BRAM_SIZE :    integer := 1024;
         -- FIXME Boot BRAM can't be omitted
-        OBJ_CODE :          t_obj_code := default_object_code;
+        OBJECT_CODE :       t_obj_code := default_object_code;
         SRAM_ADDR_SIZE :    integer := 17           -- < 10 to disable SRAM I/F
         -- FIXME SRAM I/F can't be disabled
     );
@@ -158,7 +158,7 @@ constant BOOT_BRAM_ADDR_SIZE : integer := log2(BOOT_BRAM_SIZE);
 subtype t_boot_bram_address is std_logic_vector(BOOT_BRAM_ADDR_SIZE-1 downto 0);
 -- Boot BRAM, initialized with constant object code table
 signal boot_bram :          t_word_table(0 to BOOT_BRAM_SIZE-1) := 
-                                    objcode_to_wtable(OBJ_CODE, BOOT_BRAM_SIZE);
+                                objcode_to_wtable(OBJECT_CODE, BOOT_BRAM_SIZE);
 
 -- NOTE: 'write' signals are a remnant from a previous version, to be removed
 signal bram_rd_addr :       t_boot_bram_address; 

@@ -2,7 +2,8 @@
 -- ION MIPS-compatible CPU demo on Terasic DE-1 Cyclone-II starter board
 --##############################################################################
 -- This module is little more than a wrapper around the SoC.
--- Synthesize with 'speed' optimization for best results.
+--------------------------------------------------------------------------------
+-- Switch 9 (leftmost) is used as reset.
 --------------------------------------------------------------------------------
 -- NOTE: See note at bottom of file about optional use of PLL.
 --##############################################################################
@@ -135,8 +136,8 @@ signal reg_display :        std_logic_vector(31 downto 0);
 signal reset_sync :         std_logic_vector(3 downto 0);
 
 -- Reset pushbutton debouncing logic
-subtype t_debouncer is integer range 0 to CLOCK_FREQ;
-constant DEBOUNCING_DELAY : t_debouncer := 500;
+subtype t_debouncer is integer range 0 to CLOCK_FREQ*4;
+constant DEBOUNCING_DELAY : t_debouncer := 1500;
 signal debouncing_counter : t_debouncer := (CLOCK_FREQ/1000) * DEBOUNCING_DELAY;
 
 -- Quad 7-segment display (non multiplexed) & LEDS
@@ -225,7 +226,8 @@ begin
 
     mpu: entity work.mips_soc
     generic map (
-        OBJ_CODE       => obj_code,
+        OBJECT_CODE    => obj_code,
+        BOOT_BRAM_SIZE => work.obj_code_pkg.BRAM_SIZE,
         CLOCK_FREQ     => CLOCK_FREQ,
         SRAM_ADDR_SIZE => SRAM_ADDR_SIZE
     )
@@ -363,7 +365,7 @@ mpu_sram_data_rd <=
 -- RESET, CLOCK
 --##############################################################################
 
--- Use button 3 as reset
+
 -- This FF chain only prevents metastability trouble, it does not help with
 -- switching bounces.
 -- (NOTE: the anti-metastability logic is probably not needed when we include 
@@ -372,7 +374,7 @@ reset_synchronization:
 process(clk)
 begin
     if clk'event and clk='1' then
-        reset_sync(3) <= not buttons(2);
+        reset_sync(3) <= not switches(9);
         reset_sync(2) <= reset_sync(3);
         reset_sync(1) <= reset_sync(2);
         reset_sync(0) <= reset_sync(1);
