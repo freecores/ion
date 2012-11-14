@@ -74,7 +74,7 @@
 -- 'mirror' effect in the cache. We have split the memory space 
 -- into 32 separate blocks of 1MB which is obviously not enough but will do
 -- for the initial tests.
--- In subsequen versions of the cache, the tag size needs to be enlarged AND 
+-- In subsequent versions of the cache, the tag size needs to be enlarged AND 
 -- some of the top bits might be omitted when they're not needed to implement 
 -- the default memory map (namely bit 30 which is always '0').
 --
@@ -82,11 +82,11 @@
 -- @note3: Synthesis problem in Quartus-II and workaround
 --
 -- I had to put a 'dummy' mux between the cache line store and the CPU in order 
--- to get rid of a quirk in Quartus-II synthseizer (several versions).
+-- to get rid of a quirk in Quartus-II synthesizer (several versions).
 -- If we omit this extra dummy layer of logic the synth will fail to infer the 
 -- tag table as a BRAM and will use logic fabric instead, crippling performance.
 -- The mux is otherwise useless and hits performance badly, but so far I haven't
--- found any other way to overcome this bug, not even with the helop of the  
+-- found any other way to overcome this bug, not even with the help of the  
 -- Altera support forum.
 -- Probable cause of this behavior: according to the Cyclone-II manual (section 
 -- 'M4K Routing Interface'), no direct connection is possible between an M4K 
@@ -99,7 +99,7 @@
 -- @note4: Startup values for the cache tables
 -- 
 -- The cache tables has been given startup values; these are only for simulation
--- convenience and have no effect on the cache behaviour (and obviuosly they
+-- convenience and have no effect on the cache behaviour (and obviously they
 -- are only used after FPGA config, not after reset). 
 --
 --------------------------------------------------------------------------------
