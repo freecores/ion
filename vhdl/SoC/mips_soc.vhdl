@@ -119,6 +119,10 @@ entity mips_soc is
         uart_rxd        : in std_logic;
         uart_txd        : out std_logic;
         
+        -- I/O ports
+        p0_out          : out std_logic_vector(31 downto 0);
+        p1_in           : in std_logic_vector(31 downto 0);
+        
         -- Debug info register output
         debug_info      : out t_debug_info
     );
@@ -152,6 +156,11 @@ signal mpu_io_byte_we :     std_logic_vector(3 downto 0);
 signal uart_ce :            std_logic;
 signal uart_irq :           std_logic;
 signal uart_rd_byte :       std_logic_vector(7 downto 0);
+
+-- I/O registers
+signal p0_reg :             std_logic_vector(31 downto 0);
+signal p1_reg :             std_logic_vector(31 downto 0);
+signal gpio_rd_data :       std_logic_vector(31 downto 0);
 
 -- Bootstrap code BRAM
 constant BOOT_BRAM_ADDR_SIZE : integer := log2(BOOT_BRAM_SIZE);
@@ -315,13 +324,58 @@ uart_ce <= '1'
 
     
 --------------------------------------------------------------------------------
+-- GPIO registers
+
+gpio_output_registers:
+process(clk)
+begin
+    if clk'event and clk='1' then
+        if reset='1' then
+            p0_reg <= (others => '0');
+        else
+            if mpu_io_wr_addr(19 downto 12)=X"01" then
+                if mpu_io_byte_we(0)='1' then
+                    p0_reg( 7 downto  0) <= mpu_io_wr_data( 7 downto  0);
+                end if;
+                if mpu_io_byte_we(1)='1' then
+                    p0_reg(15 downto  8) <= mpu_io_wr_data(15 downto  8);
+                end if;
+                if mpu_io_byte_we(2)='1' then
+                    p0_reg(23 downto 16) <= mpu_io_wr_data(23 downto 16);
+                end if;
+                if mpu_io_byte_we(3)='1' then
+                    p0_reg(31 downto 24) <= mpu_io_wr_data(31 downto 24);
+                end if;
+            end if;
+        end if;
+    end if;
+end process gpio_output_registers; 
+
+p0_out <= p0_reg;
+
+gpio_input_registers:
+process(clk)
+begin
+    -- Note the input register needs no reset value.
+    if clk'event and clk='1' then
+        p1_reg <= p1_in;
+    end if;
+end process gpio_input_registers;
+
+with mpu_io_rd_addr(2) select gpio_rd_data <=
+    p0_reg      when '0',
+    p1_reg      when others;
+
+    
+--------------------------------------------------------------------------------
 -- I/O port multiplexor 
     
     
 -- IO Rd mux: either the UART data/status word or the IO coming from outside
-mpu_io_rd_data <= 
-    X"000000" & uart_rd_byte when mpu_io_rd_addr(19 downto 12)=X"00" else
-    io_rd_data;
+with mpu_io_rd_addr(19 downto 12) select mpu_io_rd_data <= 
+    X"000000" & uart_rd_byte    when X"00",
+    gpio_rd_data                when X"01",
+    io_rd_data                  when others;
 
 -- io_rd_data 
 io_rd_addr <= mpu_io_rd_addr;

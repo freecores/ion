@@ -118,6 +118,9 @@ signal write_tx :           std_logic;
 -- I/O registers
 
 
+signal p0_out :             std_logic_vector(31 downto 0);
+signal p1_in :              std_logic_vector(31 downto 0);
+
 signal sd_clk_reg :         std_logic;
 signal sd_cs_reg :          std_logic;
 signal sd_cmd_reg :         std_logic;
@@ -125,8 +128,7 @@ signal sd_do_reg :          std_logic;
 
 
 -- CPU access to hex display
-signal reg_display :        std_logic_vector(31 downto 0);
-
+signal reg_display :        std_logic_vector(15 downto 0);
 
 
 --##############################################################################
@@ -168,24 +170,18 @@ signal pll_locked :         std_logic;
 --    );
 --end component;
 
--- SD control signals
-signal sd_in :              std_logic;
-signal reg_sd_dout :        std_logic;
-signal reg_sd_clk :         std_logic;
-signal reg_sd_cs :          std_logic;
-
 -- MPU interface signals
 signal data_uart :          std_logic_vector(31 downto 0);
 signal data_uart_status :   std_logic_vector(31 downto 0);
 signal uart_tx_rdy :        std_logic := '1';
 signal uart_rx_rdy :        std_logic := '1';
 
-signal io_rd_data :         std_logic_vector(31 downto 0);
-signal io_rd_addr :         std_logic_vector(31 downto 2);
-signal io_wr_addr :         std_logic_vector(31 downto 2);
-signal io_wr_data :         std_logic_vector(31 downto 0);
-signal io_rd_vma :          std_logic;
-signal io_byte_we :         std_logic_vector(3 downto 0);
+--signal io_rd_data :         std_logic_vector(31 downto 0);
+--signal io_rd_addr :         std_logic_vector(31 downto 2);
+--signal io_wr_addr :         std_logic_vector(31 downto 2);
+--signal io_wr_data :         std_logic_vector(31 downto 0);
+--signal io_rd_vma :          std_logic;
+--signal io_byte_we :         std_logic_vector(3 downto 0);
 
 signal mpu_sram_address :   std_logic_vector(SRAM_ADDR_SIZE-1 downto 0);
 signal mpu_sram_data_rd :   std_logic_vector(15 downto 0);
@@ -234,13 +230,13 @@ begin
     port map (
         interrupt   => "00000000",
 
-        -- interface to FPGA i/o devices
-        io_rd_data  => io_rd_data,
-        io_rd_addr  => io_rd_addr,
-        io_wr_addr  => io_wr_addr,
-        io_wr_data  => io_wr_data,
-        io_rd_vma   => io_rd_vma,
-        io_byte_we  => io_byte_we,
+        -- interface to off-SoC, on-FPGA i/o devices: UNUSED
+        io_rd_data  => X"00000000",
+        io_rd_addr  => OPEN,
+        io_wr_addr  => OPEN,
+        io_wr_data  => OPEN,
+        io_rd_vma   => OPEN,
+        io_byte_we  => OPEN,
 
         -- interface to asynchronous 16-bit-wide EXTERNAL SRAM
         sram_address    => mpu_sram_address,
@@ -252,6 +248,9 @@ begin
         uart_rxd    => rxd,
         uart_txd    => txd,
 
+        p0_out      => p0_out,
+        p1_in       => p1_in,
+        
         debug_info  => debug_info,
         
         clk         => clk,
@@ -260,48 +259,18 @@ begin
 
 
 --##############################################################################
--- I/O registers
+-- GPIO and LEDs
 --##############################################################################
 
-hex_display_register:
-process(clk)
-begin
-    if clk'event and clk='1' then
-        if io_byte_we/="0000" and io_wr_addr(15 downto 12)=X"2" then
-            --reg_display(15 downto 0) <= io_wr_data(15 downto 0);
-            reg_display <= mpu_sram_address;
-        end if;
-    end if;
-end process hex_display_register;    
-    
-sd_control_register:
-process(clk)
-begin
-    if clk'event and clk='1' then
-        if io_byte_we/="0000" and io_wr_addr(15 downto 12)=X"1" then
-            if io_wr_addr(5)='1' then
-                sd_clk_reg <= io_wr_addr(4);
-            end if;
-            if io_wr_addr(7)='1' then
-                sd_cs_reg <= io_wr_addr(6);
-            end if;   
-            if io_wr_addr(11)='1' then
-                sd_do_reg <= io_wr_data(0);
-            end if;   
-        end if;
-    end if;
-end process sd_control_register;    
+---- LEDS -- We'll use the LEDs to display debug info --------------------------
 
-    
+-- HEX display is mostly unused
+reg_display <= p0_out(31 downto 16);
+
 -- Show the SD interface signals on the green leds for debug
-reg_gleds <= sd_clk_reg & sd_in & sd_do_reg & "000" & sd_cmd_reg & sd_cs_reg;
+reg_gleds <= p1_in(0) & "0000" & p0_out(2 downto 0);
 
-io_rd_data(0) <= sd_in;
-io_rd_data(31 downto 22) <= switches;
-
-
-
--- red leds (light with '1') -- some CPU control signals
+-- Red leds (light with '1') -- some CPU control signals
 red_leds(0) <= debug_info.cache_enabled;
 red_leds(1) <= debug_info.unmapped_access;
 red_leds(2) <= '0';
@@ -441,7 +410,6 @@ end generate;
 --        locked  => pll_locked
 --    );
 --
-----clk <= clk_1hz when reg_display(31 downto 27)="10110" else clk_pll;
 --clk <= clk_pll;
 --end generate;
 
@@ -459,10 +427,8 @@ green_leds <= reg_gleds;
 --##############################################################################
 
 -- Show contents of debug register in hex display
-display_data <= 
-    reg_display(15 downto 0) when switches(0)='0' else 
-    reg_display(31 downto 16);
-
+display_data <= reg_display;
+    
 
 -- 7-segment encoders; the dev board displays are not multiplexed or encoded
 hex3 <= nibble_to_7seg(display_data(15 downto 12));
@@ -475,10 +441,10 @@ hex0 <= nibble_to_7seg(display_data( 3 downto  0));
 --##############################################################################
 
 -- Connect to FFs for use in bit-banged interface (still unused)
-sd_cs       <= sd_cs_reg;
-sd_cmd      <= sd_do_reg;
-sd_clk      <= sd_clk_reg;
-sd_in       <= sd_data;
+sd_cs       <= p0_out(0);       -- SPI CS
+sd_cmd      <= p0_out(2);       -- SPI DI
+sd_clk      <= p0_out(1);       -- SPI SCLK
+p1_in(0)    <= sd_data;         -- SPI DO
 
 
 --##############################################################################
