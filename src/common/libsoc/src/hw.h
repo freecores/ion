@@ -17,4 +17,10 @@
 #define UART_RXRDY_MASK     (0x00000002)    /**< Flag mask for 'RX ready' */
 #define UART_TXRDY_MASK     (0x00000001)    /**< Flag mask for 'TX ready' */
 
+#define GPIO_P0             (0x20001000)    /**< P0 output register */
+#define GPIO_P1             (0x20001004)    /**< P1 input register */
+
+#define WRPORT(p,v)         *((volatile unsigned int *)(GPIO_P0+(p*4)))=v
+#define RDPORT(p)           (*((volatile unsigned int *)(GPIO_P0+(p*4))))    
+
 #endif // HW_H_INCLUDED
