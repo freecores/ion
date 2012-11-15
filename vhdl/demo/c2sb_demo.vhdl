@@ -138,7 +138,7 @@ signal reg_display :        std_logic_vector(15 downto 0);
 signal reset_sync :         std_logic_vector(3 downto 0);
 
 -- Reset pushbutton debouncing logic
-subtype t_debouncer is integer range 0 to CLOCK_FREQ*4;
+subtype t_debouncer is natural range 0 to CLOCK_FREQ*4;
 constant DEBOUNCING_DELAY : t_debouncer := 1500;
 signal debouncing_counter : t_debouncer := (CLOCK_FREQ/1000) * DEBOUNCING_DELAY;
 
@@ -257,6 +257,7 @@ begin
         reset       => reset
     );
 
+    
 
 --##############################################################################
 -- GPIO and LEDs
@@ -266,6 +267,7 @@ begin
 
 -- HEX display is mostly unused
 reg_display <= p0_out(31 downto 16);
+
 
 -- Show the SD interface signals on the green leds for debug
 reg_gleds <= p1_in(0) & "0000" & p0_out(2 downto 0);
@@ -279,7 +281,7 @@ red_leds(4) <= '0';
 red_leds(5) <= '0';
 red_leds(6) <= '0';
 red_leds(7) <= '0';
-red_leds(8) <= '0';
+red_leds(8) <= reset;
 red_leds(9) <= clk_1hz;
 
 
@@ -364,7 +366,7 @@ begin
     end if;
 end process reset_debouncing;
 
---
+-- Reset will be active and glitch free for some serious time (1.5 s).
 reset <= '1' when debouncing_counter /= 0 or pll_locked='0' else '0';
 
 -- Generate a 1-Hz 'clock' to flash a LED for visual reference.
