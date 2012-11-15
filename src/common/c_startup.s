@@ -56,7 +56,7 @@ move_data_section_loop:
     addiu   $a1,$a1,4
     sw      $t0,0($a0)
     addiu   $a0,$a0,4
-    bnez    $s0,move_data_section_loop
+    bgtz    $s0,move_data_section_loop
     addiu   $s0,$s0,-4
 move_data_section_done:
     
