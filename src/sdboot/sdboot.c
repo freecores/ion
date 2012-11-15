@@ -42,10 +42,6 @@ int main (void)
 
     
     printf("ION SD loader -- " __DATE__ "\n\n");
-    printf("Loading file '/code.bin' onto RAM at address 0x00000000...\n");
-    
-    
-    WRPORT(0,0x17890083);
     
 
 	f_mount(0, &Fatfs);		/* Register volume work area (never fails) */
@@ -53,6 +49,8 @@ int main (void)
 	rc = f_open(&Fil, "CODE.BIN", FA_READ);
 	if (rc) die(rc);
 
+    printf("Loading file '/code.bin' onto RAM at address 0x00000000...\n");
+    
 	for (;;) {
 		rc = f_read(&Fil, Buff, sizeof Buff, &br);	/* Read a chunk of file */
 		if (rc || !br) break;			/* Error or end of file */
