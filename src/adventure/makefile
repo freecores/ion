@@ -42,6 +42,14 @@ CFLAGS_MAIN = -O2 -Wall -c -s -fno-builtin -nodefaultlibs -nostdlib \
          -msoft-float -mips1 -G0
 AFLAGS_MAIN = --defsym XRAM_BASE=$(XRAM_START)
 
+# Options for 'main' code running from XRAM at 0x00000000:
+# 1.- Put the code and the data in external XRAM.
+# 2.- Do not use any of the standard libraries and use libsoc instead.
+LINK_SCRIPT_XRAM=$(SRC_DIR)/common/xram.lds
+LFLAGS_SD = -T$(LINK_SCRIPT_XRAM) -L $(LIB_PATH) \
+         -nodefaultlibs -nostdlib -eentry -I elf32-big
+
+
 # Object files for main program
 OBJS = c_startup.o main.o actions1.o actions2.o init.o misc.o \
         score.o adv_baremetal.o
@@ -50,6 +58,21 @@ SRCS = actions1.c actions2.c main.c init.c misc.c score.c adv_baremetal.c
 
 #-- Targets & rules ------------------------------------------------------------
 
+# Use this target to make a 'bootloadable' binary of adventure as 'code.bin'.
+# You can then boot this file from an SD card using the sdboot demo bootloader.
+sd: code.bin
+	@# This comment prevents use of implicit rule so our rules are used instead.
+	@# This will save us a few harmless linker warnings.
+
+code.bin: code.axf
+    # Extract object code to be placed in code space
+	$(COPY) -I elf32-big -O binary code.axf code.bin
+
+code.axf: $(OBJS)
+	$(LD) $(LFLAGS_SD) -Map adventure.map -s -N -o code.axf $(OBJS) -lsoc
+	-@$(DUMP) -m mips --disassemble adventure.axf > adventure.lst
+    
+    
 adventure: adventure.bin bootstrap
 	@# This comment prevents use of implicit rule so our rules are used instead.
 	@# This will save us a few harmless linker warnings.

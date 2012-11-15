@@ -48,6 +48,8 @@ extern action(long);
 
 main() {
 
+puts("Adventure bare-metal port -- " __DATE__ "\n");
+
 /* Initialize file data structures */
 startup();
 
