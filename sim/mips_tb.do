@@ -13,7 +13,7 @@ vcom -reportprogress 300 -work work ../vhdl/mips_cache_stub.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_cache.vhdl
 
 vcom -reportprogress 300 -work work ../vhdl/SoC/uart.vhdl
-vcom -reportprogress 300 -work work ../vhdl/SoC/bootstrap_code_pkg.vhdl
+#vcom -reportprogress 300 -work work ../vhdl/SoC/bootstrap_code_pkg.vhdl
 vcom -reportprogress 300 -work work ../vhdl/SoC/mips_soc.vhdl
 
 vcom -reportprogress 300 -work work ../vhdl/tb/txt_util.vhdl
