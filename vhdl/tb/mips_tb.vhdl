@@ -58,6 +58,7 @@ use work.txt_util.all;
 use work.mips_pkg.all;
 use work.mips_tb_pkg.all;
 use work.sim_params_pkg.all;
+--use work.obj_code_pkg.obj_code;
 
 
 entity mips_tb is
@@ -169,7 +170,7 @@ begin
     mpu: entity work.mips_soc
     generic map (
         BOOT_BRAM_SIZE => bram_size,
-        OBJ_CODE       => obj_code,
+        OBJECT_CODE    => obj_code,
         CLOCK_FREQ     => 50000000,
         SRAM_ADDR_SIZE => 32
     )
@@ -194,6 +195,9 @@ begin
         uart_rxd        => rxd,
         uart_txd        => txd,
 
+        p0_out          => OPEN,
+        p1_in           => X"00000000",
+        
         debug_info      => OPEN,
         
         clk             => clk,
