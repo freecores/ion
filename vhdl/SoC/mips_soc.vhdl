@@ -140,6 +140,7 @@ signal cpu_code_rd_vma :    std_logic;
 signal cpu_data_wr :        t_word;
 signal cpu_byte_we :        std_logic_vector(3 downto 0);
 signal cpu_mem_wait :       std_logic;
+signal cpu_cache_ready :    std_logic;
 signal cpu_ic_invalidate :  std_logic;
 signal cpu_cache_enable :   std_logic;
 signal unmapped_access :    std_logic;
@@ -196,6 +197,7 @@ cpu: entity work.mips_cpu
         byte_we     => cpu_byte_we,
     
         mem_wait    => cpu_mem_wait,
+        cache_ready => cpu_cache_ready,
         cache_enable=> cpu_cache_enable,
         ic_invalidate=>cpu_ic_invalidate,
         
@@ -225,6 +227,7 @@ cache: entity work.mips_cache
         data_wr         => cpu_data_wr,
                         
         mem_wait        => cpu_mem_wait,
+        cache_ready     => cpu_cache_ready,
         cache_enable    => cpu_cache_enable,
         ic_invalidate   => cpu_ic_invalidate,
         unmapped        => unmapped_access,

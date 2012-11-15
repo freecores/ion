@@ -206,6 +206,7 @@ entity mips_cache is
         data_wr         : in std_logic_vector(31 downto 0);
 
         mem_wait        : out std_logic;
+        cache_ready     : out std_logic;
         cache_enable    : in std_logic;
         ic_invalidate   : in std_logic;
         unmapped        : out std_logic;
@@ -260,6 +261,7 @@ subtype t_wait_state_counter is std_logic_vector(2 downto 0);
 -- State machine ----------------------------------------------------
 
 type t_cache_state is (
+    cache_reset,                -- Between reset and 1st code refill,
     idle,                       -- Cache is hitting, control machine idle
 
     -- Code refill --------------------------------------------------
@@ -389,6 +391,7 @@ signal code_miss_uncached : std_logic;
 -- '1' when the I-cache state machine stalls the pipeline (mem_wait)
 signal code_wait :          std_logic;
 
+
 -- D-cache ----------------------------------------------------------
 
 subtype t_data_tag is std_logic_vector(DATA_TAG_SIZE+1-1 downto 0);
@@ -468,7 +471,7 @@ process(clk)
 begin
    if clk'event and clk='1' then
         if reset='1' then
-            ps <= idle;
+            ps <= cache_reset;
         else
             ps <= ns;
         end if;
@@ -485,7 +488,13 @@ process(ps, code_rd_vma, data_rd_vma, code_miss,
         write_pending, read_pending)
 begin
     case ps is
-    when idle =>
+        
+    -- The cache will remain in 'cache_reset' state until the first code miss,
+    -- at which time the state machine proceeds as usual.
+    -- The only difference between states idle and cache_reset is that in
+    -- cache_reset the output cache_ready is '0', which will prevent the CPU
+    -- from loading its IR with the cache output -- which is known invalid.
+    when idle | cache_reset =>
         if code_miss='1' then
             case code_rd_attr.mem_type is
             when MT_BRAM        => ns <= code_refill_bram_0;
@@ -1416,6 +1425,13 @@ with ps select data_wait <=
     '1' when data_read_io_0,
     -- In any other state, stall CPU only if there's a RD/WR pending.
     read_pending or write_pending when others;
+
+
+    -- The cache will be ready only after the first code refill.
+    -- This will prevent the CPU from loading junk into the IR.
+    with ps select cache_ready <=
+        '0' when cache_reset,
+        '1' when others;
 
 
 end architecture direct;

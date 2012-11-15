@@ -96,7 +96,8 @@ entity mips_cpu is
         cache_enable    : out std_logic;
         ic_invalidate   : out std_logic;
 
-        mem_wait        : in std_logic
+        mem_wait        : in std_logic;
+        cache_ready     : in std_logic
     );
 end; --entity mips_cpu
 
@@ -563,7 +564,16 @@ begin
         if reset='1' then
             p1_ir_reg <= (others => '0');
         elsif stall_pipeline='0' then
-            p1_ir_reg <= code_rd;
+            -- Load the IR with whatever the cache is giving us, UNLESS the
+            -- cache is not ready (has not yet completed the first code refill
+            -- after reset), in which case...
+            if cache_ready='1' then
+                p1_ir_reg <= code_rd;
+            else
+                -- ... load the IR with something innocuous so that the 
+                -- instruction decoder does not derail.
+                p1_ir_reg <= (others => '0');
+            end if;
         end if;
     end if;
 end process instruction_register;
