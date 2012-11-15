@@ -17,11 +17,11 @@ void die (		/* Stop with dying message */
 )
 {
     switch(rc){
-    case FR_NOT_READY:      printf("Disk absent.");
-    case FR_DISK_ERR:       printf("Low level disk i/o error.");
-    case FR_NO_FILESYSTEM:  printf("No valid filesystem in drive.");
-    case FR_NO_FILE:        printf("File not found.");
-    default:                printf("Failed with rc=%u.", rc);
+    case FR_NOT_READY:      printf("Disk absent."); break;
+    case FR_DISK_ERR:       printf("Low level disk i/o error."); break;
+    case FR_NO_FILESYSTEM:  printf("No valid filesystem in drive."); break;
+    case FR_NO_FILE:        printf("File not found."); break;
+    default:                printf("Failed with rc=%u.", rc); break;
     }
     printf("\n");
 	for (;;) ;
