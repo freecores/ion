@@ -7,6 +7,7 @@ vcom -reportprogress 300 -work work ../vhdl/mips_pkg.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_shifter.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_alu.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_mult.vhdl
+vcom -reportprogress 300 -work work ../vhdl/mips_cop0.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_cpu.vhdl
 vcom -reportprogress 300 -work work ../vhdl/sdram_controller.vhdl
 vcom -reportprogress 300 -work work ../vhdl/mips_cache_stub.vhdl

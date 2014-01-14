@@ -46,6 +46,34 @@ package mips_pkg is
 subtype t_word is std_logic_vector(31 downto 0);
 subtype t_halfword is std_logic_vector(15 downto 0);
 subtype t_byte is std_logic_vector(7 downto 0);
+subtype t_pc is std_logic_vector(31 downto 2);
+
+subtype t_regindex is std_logic_vector(4 downto 0);
+
+---- Interface types -----------------------------------------------------------
+
+type t_cop0_mosi is record
+    index :             t_regindex;
+    we :                std_logic;
+    data :              t_word;
+    pc_restart :        t_pc;
+    in_delay_slot :     std_logic;
+    pipeline_stalled :  std_logic;
+    exception :         std_logic;
+    rfe :               std_logic;
+    unknown_opcode :    std_logic;
+    missing_cop :       std_logic;
+    syscall :           std_logic;
+    stall :             std_logic;
+end record t_cop0_mosi;
+
+type t_cop0_miso is record
+    data :              t_word;
+    kernel :            std_logic;
+    idcache_enable :    std_logic;
+    icache_invalidate : std_logic;
+end record t_cop0_miso;
+
 
 ---- System configuration constants --------------------------------------------
 
@@ -144,7 +172,6 @@ subtype t_addr is std_logic_vector(31 downto 0);
 subtype t_dword is std_logic_vector(63 downto 0);
 subtype t_regnum is std_logic_vector(4 downto 0);
 type t_rbank is array(0 to 31) of t_word;
-subtype t_pc is std_logic_vector(31 downto 2);
 -- This is used as a textual shortcut only
 constant ZERO : t_word := (others => '0');
 -- control word for ALU

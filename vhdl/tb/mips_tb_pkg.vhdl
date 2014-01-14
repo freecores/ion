@@ -399,11 +399,11 @@ begin
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/mult_div/lower_reg", signal_name&".reg_lo", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/mult_div/negate_reg", signal_name&".negate_reg_lo", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/mult_div/count_reg", signal_name&".mdiv_count_reg", 0);
-    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cp0_epc", signal_name&".cp0_epc", 0);
-    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cp0_status", signal_name&".cp0_status", 0);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cop0/cp0_epc", signal_name&".cp0_epc", 0);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cop0/cp0_status", signal_name&".cp0_status", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_set_cp0", signal_name&".p1_set_cp0", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_rfe", signal_name&".p1_rfe", 0);
-    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cp0_cache_control", signal_name&".cp0_cache_control", 0);
+    init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/cop0/cp0_cache_control", signal_name&".cp0_cache_control", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/data_rd_vma", signal_name&".data_rd_vma", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/p1_rbank_we", signal_name&".p1_rbank_we", 0);
     init_signal_spy("/"&mcu_entity&"/"&cpu_name&"/code_rd_vma", signal_name&".code_rd_vma", 0);

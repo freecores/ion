@@ -234,23 +234,10 @@ signal stalled_interlock :  std_logic;
 signal reset_done :         std_logic;
 
 --------------------------------------------------------------------------------
--- CP0 registers and signals
+-- CP0 interface signals
 
--- CP0[12]: status register, KUo/IEo & KUP/IEp & KU/IE  bits
-signal cp0_status :         std_logic_vector(5 downto 0);
-signal cp0_sr_ku_reg :      std_logic;
--- CP0[12]: status register, cache control
-signal cp0_cache_control :  std_logic_vector(17 downto 16);
--- Output of CP0 register bank (only a few regs are implemented)
-signal cp0_reg_read :       t_word;
--- CP0[14]: EPC register (PC value saved at exceptions)
-signal cp0_epc :            t_pc;
--- CP0[13]: 'Cause' register (cause and attributes of exception)
-signal cp0_cause :          t_word;
-signal cp0_in_delay_slot :  std_logic;
-signal cp0_cause_bd :       std_logic;
-signal cp0_cause_ce :       std_logic_vector(1 downto 0);
-signal cp0_cause_exc_code : std_logic_vector(4 downto 0);
+signal cp0_mosi :           t_cop0_mosi;
+signal cp0_miso :           t_cop0_miso;
 
 begin
 
@@ -322,7 +309,7 @@ with (p2_wback_mux_sel) select p1_rbank_wr_data <=
     p1_alu_outp                when "00",
     p2_data_word_rd            when "01",
     p0_pc_incremented & "00"   when "11",
-    cp0_reg_read               when others;
+    cp0_miso.data              when others;
 
 --------------------------------------------------------------------------------
 -- Register bank RAM & Rbank WE logic
@@ -503,9 +490,9 @@ begin
             if (p1_jump_type="00" or p0_jump_cond_value='0') then 
                 p0_pc_restart <= p0_pc_reg;
                 -- remember if we are in a delay slot, in case there's a trap
-                cp0_in_delay_slot <= '0'; -- NOT in a delay slot
+                cp0_mosi.in_delay_slot <= '0'; -- NOT in a delay slot
             else
-                cp0_in_delay_slot <= '1'; -- in a delay slot
+                cp0_mosi.in_delay_slot <= '1'; -- in a delay slot
             end if;
             end if;
         end if;
@@ -829,8 +816,7 @@ p1_cp_unavailable <= '1' when
     (p1_set_cp='1' and p1_set_cp0='0') or   -- mtc1..3
     (p1_get_cp='1' and p1_get_cp0='0') or   -- mfc1..3
     ((p1_get_cp0='1' or p1_set_cp0='1' or p1_rfe='1') 
-                     and cp0_sr_ku_reg='0') 
-                     --and cp0_status(1)='0') -- COP0 user mode
+                     and cp0_miso.kernel='0') -- COP0 user mode
     -- FIXME CP1..3 logic missing
     else '0';
     
@@ -1067,81 +1053,32 @@ with p1_we_control select data_wr(31 downto 24) <=
 --##############################################################################
 -- CP0 and exception processing
 
-cp0_registers:
-process(clk)
-begin
-    if clk'event and clk='1' then
-        if reset='1' then
-            -- KU/IE="10"  ==>  mode=kernel; ints=disabled
-            cp0_status <= "000010";  -- bits (KUo/IEo & KUp/IEp) reset to zero
-            cp0_sr_ku_reg <= '1'; -- delayed KU flag
-            cp0_cache_control <= "00";
-            cp0_cause_exc_code <= "00000";
-            cp0_cause_bd <= '0';
-        else
-            if pipeline_stalled='0' then
-                if p1_exception='1' then
-                    -- Exception: do all that needs to be done right here
-                
-                    -- Save PC in EPC register...
-                    cp0_epc <= p0_pc_restart;
-                    -- ... set KU flag to Kernel mode ...
-                    cp0_status(1) <= '1';
-                    -- ... and 'push' old KU/IE flag values 
-                    cp0_status(5 downto 4) <= cp0_status(3 downto 2);
-                    cp0_status(3 downto 2) <= cp0_status(1 downto 0);
-                    
-                    -- Set the 'exception cause' code... 
-                    if p1_unknown_opcode='1' then
-                        cp0_cause_exc_code <= "01010"; -- bad opcode ('reserved')
-                    elsif p1_cp_unavailable='1' then
-                        -- this triggers for mtc0/mfc0 in user mode too
-                        cp0_cause_exc_code <= "01011"; -- CP* unavailable 
-                    else
-                        if p1_ir_fn(0)='0' then
-                            cp0_cause_exc_code <= "01000"; -- syscall
-                        else
-                            cp0_cause_exc_code <= "01001"; -- break
-                        end if;
-                    end if;
-                    -- ... and the BD flag for exceptions in delay slots
-                    cp0_cause_bd <= cp0_in_delay_slot;
-                
-                elsif p1_rfe='1' and cp0_status(1)='1' then
-                    -- RFE: restore ('pop') the KU/IE flag values
-                    
-                    cp0_status(3 downto 2) <= cp0_status(5 downto 4);
-                    cp0_status(1 downto 0) <= cp0_status(3 downto 2);
-                    
-                elsif p1_set_cp0='1' and cp0_status(1)='1' then
-                    -- MTC0: load CP0[xx] with Rt
-                
-                    -- NOTE: in MTCx, the source register is Rt
-                    -- FIXME this works because only SR is writeable; when 
-                    -- CP0[13].IP1-0 are implemented, check for CP0 reg index.
-                    cp0_status <= p1_rt(cp0_status'high downto 0);
-                    cp0_cache_control <= p1_rt(17 downto 16);
-                end if;
-            end if;
-            if stall_pipeline='0' then
-                cp0_sr_ku_reg <= cp0_status(1);
-            end if;
-        end if;
-    end if;
-end process cp0_registers;
 
-cache_enable <= cp0_cache_control(17);
-ic_invalidate <= cp0_cache_control(16);
+cp0_mosi.index <= p1_ir_reg(15 downto 11);
+cp0_mosi.we <= p1_set_cp0;
+cp0_mosi.data <= p1_rt;
+cp0_mosi.pc_restart <= p0_pc_restart;
+cp0_mosi.pipeline_stalled <= pipeline_stalled;
+cp0_mosi.exception <= p1_exception;
+cp0_mosi.rfe <= p1_rfe;
+cp0_mosi.unknown_opcode <= p1_unknown_opcode;
+cp0_mosi.missing_cop <= p1_cp_unavailable;
+cp0_mosi.syscall <= not p1_ir_fn(0);
+cp0_mosi.stall <= stall_pipeline;
 
-cp0_cause_ce <= "00"; -- FIXME CP* traps merged with unimplemented opcode traps
-cp0_cause <= cp0_cause_bd & '0' & cp0_cause_ce & 
-             X"00000" & '0' & cp0_cause_exc_code & "00";
 
--- FIXME the mux should mask to zero for any unused reg index
-with p1_c0_rs_num select cp0_reg_read <=
-    X"000000" & "00" & cp0_status   when "01100",
-    cp0_cause                       when "01101",
-    cp0_epc & "00"                  when others;
+cache_enable <= cp0_miso.idcache_enable;
+ic_invalidate <= cp0_miso.icache_invalidate;
+
+
+cop0 : entity work.mips_cop0
+    port map (
+        clk             => clk,
+        reset           => reset,
+        
+        cpu_i           => cp0_mosi,
+        cpu_o           => cp0_miso
+    );
 
 
 end architecture rtl;
